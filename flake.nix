@@ -29,6 +29,9 @@
           
           # All-in-one package (library, CLI, and tests)
           all = import ./nix/all.nix { inherit pkgs common src; };
+          
+          # CI package: skips plugin tests (pre-compiled plugins have incompatible Nix store paths)
+          ci = import ./nix/all.nix { inherit pkgs common src; skipPluginTests = true; };
         in
         {
           # lm binary package
@@ -39,6 +42,9 @@
           
           # All-in-one package with tests
           all = all;
+          
+          # CI package (skips plugin tests)
+          ci = ci;
           
           # Default package (library)
           default = lib;

@@ -1,5 +1,6 @@
 # Builds logos-module library, CLI binary, and tests all together
-{ pkgs, common, src }:
+# skipPluginTests: set to true in CI where pre-compiled plugins won't load
+{ pkgs, common, src, skipPluginTests ? false }:
 
 pkgs.stdenv.mkDerivation {
   pname = "${common.pname}-all";
@@ -45,6 +46,11 @@ pkgs.stdenv.mkDerivation {
     # Install test executable
     cp build/tests/logos_module_tests $out/bin/
     
+    # Install test plugin files for post-install testing
+    mkdir -p $out/share/logos-module/test-plugins
+    cp tests/examples/*.so $out/share/logos-module/test-plugins/ 2>/dev/null || true
+    cp tests/examples/*.dylib $out/share/logos-module/test-plugins/ 2>/dev/null || true
+    
     runHook postInstall
   '';
   
@@ -52,24 +58,20 @@ pkgs.stdenv.mkDerivation {
   doCheck = true;
   checkPhase = let
     pluginExt = if pkgs.stdenv.isDarwin then "dylib" else "so";
+    ctestCmd = if skipPluginTests
+      then "ctest --output-on-failure --exclude-regex CLIPluginTest"
+      else "ctest --output-on-failure";
   in ''
     runHook preCheck
     
     cd build
-    # Set LM_BINARY environment variable for CLI tests (absolute path)
     export LM_BINARY="$(pwd)/bin/lm"
-    # Set TEST_PLUGIN environment variable for real plugin tests (absolute path)
     export TEST_PLUGIN="$(pwd)/../tests/examples/package_manager_plugin.${pluginExt}"
     
-    # Debug: verify the plugin exists
-    if [ -f "$TEST_PLUGIN" ]; then
-      echo "Test plugin found at: $TEST_PLUGIN"
-    else
-      echo "Warning: Test plugin not found at: $TEST_PLUGIN"
-      ls -la ../tests/examples/ || echo "examples directory not found"
-    fi
-    
-    ctest --output-on-failure
+    ${if skipPluginTests then ''
+    echo "Skipping CLIPluginTest (pre-compiled plugins have incompatible Nix store paths)"
+    '' else ""}
+    ${ctestCmd}
     cd ..
     
     runHook postCheck
