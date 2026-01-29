@@ -2,10 +2,12 @@
   description = "Logos Module Library - Qt plugin system abstraction layer";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    # Follow the same nixpkgs as logos-cpp-sdk to ensure compatibility
+    nixpkgs.follows = "logos-cpp-sdk/nixpkgs";
+    logos-cpp-sdk.url = "github:logos-co/logos-cpp-sdk";
   };
 
-  outputs = { self, nixpkgs }:
+  outputs = { self, nixpkgs, logos-cpp-sdk }:
     let
       systems = [ "aarch64-darwin" "x86_64-darwin" "aarch64-linux" "x86_64-linux" ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f {
