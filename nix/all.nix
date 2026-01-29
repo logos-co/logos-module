@@ -50,12 +50,25 @@ pkgs.stdenv.mkDerivation {
   
   # Run tests during build to ensure they pass
   doCheck = true;
-  checkPhase = ''
+  checkPhase = let
+    pluginExt = if pkgs.stdenv.isDarwin then "dylib" else "so";
+  in ''
     runHook preCheck
     
     cd build
-    # Set LM_BINARY environment variable for CLI tests
+    # Set LM_BINARY environment variable for CLI tests (absolute path)
     export LM_BINARY="$(pwd)/bin/lm"
+    # Set TEST_PLUGIN environment variable for real plugin tests (absolute path)
+    export TEST_PLUGIN="$(pwd)/../tests/examples/package_manager_plugin.${pluginExt}"
+    
+    # Debug: verify the plugin exists
+    if [ -f "$TEST_PLUGIN" ]; then
+      echo "Test plugin found at: $TEST_PLUGIN"
+    else
+      echo "Warning: Test plugin not found at: $TEST_PLUGIN"
+      ls -la ../tests/examples/ || echo "examples directory not found"
+    fi
+    
     ctest --output-on-failure
     cd ..
     
