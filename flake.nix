@@ -2,7 +2,7 @@
   description = "Logos Module Library - Qt plugin system abstraction layer";
 
   inputs = {
-    nixpkgs.follows = "logos-cpp-sdk/nixpkgs";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
   };
 
   outputs = { self, nixpkgs }:
