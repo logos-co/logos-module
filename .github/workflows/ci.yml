@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Install Nix
+      uses: cachix/install-nix-action@v27
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+    
+    - name: Build with Nix
+      run: nix build .#ci
+    
+    - name: Run tests
+      run: |
+        export LM_BINARY="$(pwd)/result/bin/lm"
+        # Skip CLIPluginTest: pre-compiled test plugins have architecture issues in github actions
+        ./result/bin/logos_module_tests --gtest_filter=-CLIPluginTest.*
