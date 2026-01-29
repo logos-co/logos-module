@@ -44,3 +44,30 @@ install(TARGETS logos_module
 install(FILES ${MODULE_LIB_HEADERS}
     DESTINATION include/module_lib
 )
+
+# Add command-line binary
+add_subdirectory(cmd)
+
+# Testing (optional)
+option(LOGOS_MODULE_BUILD_TESTS "Build tests" OFF)
+if(LOGOS_MODULE_BUILD_TESTS)
+    # Try to find Google Test first (for Nix and system installations)
+    # Fall back to FetchContent if not found
+    find_package(GTest QUIET)
+    if(NOT GTest_FOUND)
+        message(STATUS "GTest not found, fetching from GitHub")
+        include(FetchContent)
+        FetchContent_Declare(
+            googletest
+            GIT_REPOSITORY https://github.com/google/googletest.git
+            GIT_TAG v1.14.0
+        )
+        # Prevent overriding the parent project's compiler/linker settings on Windows
+        set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+        FetchContent_MakeAvailable(googletest)
+    endif()
+    
+    enable_testing()
+    include(GoogleTest)
+    add_subdirectory(tests)
+endif()
