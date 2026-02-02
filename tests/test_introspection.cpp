@@ -1,13 +1,9 @@
 #include <gtest/gtest.h>
-#include "module_introspection.h"
+#include "logos_module.h"
 #include <QCoreApplication>
 #include <QJsonDocument>
 
 using namespace ModuleLib;
-
-// =============================================================================
-// Mock Plugin Class for Testing
-// =============================================================================
 
 class MockPlugin : public QObject {
     Q_OBJECT
@@ -31,21 +27,15 @@ public slots:
     QString slotWithReturn(int x) { return QString::number(x * 2); }
 };
 
-// Include the moc file for MockPlugin
 #include "test_introspection.moc"
-
-// =============================================================================
-// getMethods Tests
-// =============================================================================
 
 TEST(IntrospectionTest, GetMethods_ReturnsPluginMethods) {
     MockPlugin plugin;
     
-    auto methods = ModuleIntrospection::getMethods(&plugin);
+    auto methods = LogosModule::getMethods(&plugin);
     
     EXPECT_FALSE(methods.empty());
     
-    // Check that our custom methods are found
     bool foundTestMethod = false;
     bool foundNoReturnMethod = false;
     bool foundMultipleParams = false;
@@ -61,7 +51,6 @@ TEST(IntrospectionTest, GetMethods_ReturnsPluginMethods) {
         }
         if (method.name == "noReturnMethod") {
             foundNoReturnMethod = true;
-            // void return type may be empty or "void" depending on Qt version
             EXPECT_TRUE(method.returnType.isEmpty() || method.returnType == "void");
             EXPECT_TRUE(method.parameters.empty());
         }
@@ -80,13 +69,11 @@ TEST(IntrospectionTest, GetMethods_ReturnsPluginMethods) {
 TEST(IntrospectionTest, GetMethods_ExcludesBaseClass) {
     MockPlugin plugin;
     
-    auto methodsExcluded = ModuleIntrospection::getMethods(&plugin, true);
-    auto methodsIncluded = ModuleIntrospection::getMethods(&plugin, false);
+    auto methodsExcluded = LogosModule::getMethods(&plugin, true);
+    auto methodsIncluded = LogosModule::getMethods(&plugin, false);
     
-    // When excluding base class, we should have fewer methods
     EXPECT_LT(methodsExcluded.size(), methodsIncluded.size());
     
-    // Base class methods like deleteLater should only be in the included set
     bool foundDeleteLaterExcluded = false;
     bool foundDeleteLaterIncluded = false;
     
@@ -107,7 +94,7 @@ TEST(IntrospectionTest, GetMethods_ExcludesBaseClass) {
 }
 
 TEST(IntrospectionTest, GetMethods_NullPlugin) {
-    auto methods = ModuleIntrospection::getMethods(nullptr);
+    auto methods = LogosModule::getMethods(nullptr);
     
     EXPECT_TRUE(methods.empty());
 }
@@ -115,7 +102,7 @@ TEST(IntrospectionTest, GetMethods_NullPlugin) {
 TEST(IntrospectionTest, GetMethods_IncludesSlots) {
     MockPlugin plugin;
     
-    auto methods = ModuleIntrospection::getMethods(&plugin);
+    auto methods = LogosModule::getMethods(&plugin);
     
     bool foundSlotMethod = false;
     bool foundSlotWithReturn = false;
@@ -133,18 +120,13 @@ TEST(IntrospectionTest, GetMethods_IncludesSlots) {
     EXPECT_TRUE(foundSlotWithReturn);
 }
 
-// =============================================================================
-// getMethodsAsJson Tests
-// =============================================================================
-
 TEST(IntrospectionTest, GetMethodsAsJson_ReturnsValidJson) {
     MockPlugin plugin;
     
-    QJsonArray methodsJson = ModuleIntrospection::getMethodsAsJson(&plugin);
+    QJsonArray methodsJson = LogosModule::getMethodsAsJson(&plugin);
     
     EXPECT_FALSE(methodsJson.isEmpty());
     
-    // Verify JSON structure
     for (const QJsonValue& value : methodsJson) {
         EXPECT_TRUE(value.isObject());
         QJsonObject methodObj = value.toObject();
@@ -157,7 +139,7 @@ TEST(IntrospectionTest, GetMethodsAsJson_ReturnsValidJson) {
 }
 
 TEST(IntrospectionTest, GetMethodsAsJson_NullPlugin) {
-    QJsonArray methodsJson = ModuleIntrospection::getMethodsAsJson(nullptr);
+    QJsonArray methodsJson = LogosModule::getMethodsAsJson(nullptr);
     
     EXPECT_TRUE(methodsJson.isEmpty());
 }
@@ -165,7 +147,7 @@ TEST(IntrospectionTest, GetMethodsAsJson_NullPlugin) {
 TEST(IntrospectionTest, GetMethodsAsJson_ParametersIncluded) {
     MockPlugin plugin;
     
-    QJsonArray methodsJson = ModuleIntrospection::getMethodsAsJson(&plugin);
+    QJsonArray methodsJson = LogosModule::getMethodsAsJson(&plugin);
     
     bool foundMethodWithParams = false;
     
@@ -182,57 +164,44 @@ TEST(IntrospectionTest, GetMethodsAsJson_ParametersIncluded) {
     EXPECT_TRUE(foundMethodWithParams);
 }
 
-// =============================================================================
-// getClassName Tests
-// =============================================================================
-
 TEST(IntrospectionTest, GetClassName_ReturnsCorrectName) {
     MockPlugin plugin;
     
-    QString className = ModuleIntrospection::getClassName(&plugin);
+    QString className = LogosModule::getClassName(&plugin);
     
     EXPECT_EQ(className.toStdString(), "MockPlugin");
 }
 
 TEST(IntrospectionTest, GetClassName_NullPlugin) {
-    QString className = ModuleIntrospection::getClassName(nullptr);
+    QString className = LogosModule::getClassName(nullptr);
     
     EXPECT_TRUE(className.isEmpty());
 }
 
-// =============================================================================
-// hasMethod Tests
-// =============================================================================
-
 TEST(IntrospectionTest, HasMethod_ExistingMethod) {
     MockPlugin plugin;
     
-    EXPECT_TRUE(ModuleIntrospection::hasMethod(&plugin, "testMethod"));
-    EXPECT_TRUE(ModuleIntrospection::hasMethod(&plugin, "noReturnMethod"));
-    EXPECT_TRUE(ModuleIntrospection::hasMethod(&plugin, "methodWithMultipleParams"));
+    EXPECT_TRUE(LogosModule::hasMethod(&plugin, "testMethod"));
+    EXPECT_TRUE(LogosModule::hasMethod(&plugin, "noReturnMethod"));
+    EXPECT_TRUE(LogosModule::hasMethod(&plugin, "methodWithMultipleParams"));
 }
 
 TEST(IntrospectionTest, HasMethod_NonExistingMethod) {
     MockPlugin plugin;
     
-    EXPECT_FALSE(ModuleIntrospection::hasMethod(&plugin, "nonExistentMethod"));
-    EXPECT_FALSE(ModuleIntrospection::hasMethod(&plugin, ""));
+    EXPECT_FALSE(LogosModule::hasMethod(&plugin, "nonExistentMethod"));
+    EXPECT_FALSE(LogosModule::hasMethod(&plugin, ""));
 }
 
 TEST(IntrospectionTest, HasMethod_NullPlugin) {
-    EXPECT_FALSE(ModuleIntrospection::hasMethod(nullptr, "testMethod"));
+    EXPECT_FALSE(LogosModule::hasMethod(nullptr, "testMethod"));
 }
 
 TEST(IntrospectionTest, HasMethod_BaseClassMethod) {
     MockPlugin plugin;
     
-    // deleteLater is a QObject method, should be found when not excluding base
-    EXPECT_TRUE(ModuleIntrospection::hasMethod(&plugin, "deleteLater"));
+    EXPECT_TRUE(LogosModule::hasMethod(&plugin, "deleteLater"));
 }
-
-// =============================================================================
-// ParameterInfo::toJson Tests
-// =============================================================================
 
 TEST(IntrospectionTest, ParameterInfo_ToJson) {
     ParameterInfo param;
@@ -244,10 +213,6 @@ TEST(IntrospectionTest, ParameterInfo_ToJson) {
     EXPECT_EQ(json["name"].toString().toStdString(), "testParam");
     EXPECT_EQ(json["type"].toString().toStdString(), "QString");
 }
-
-// =============================================================================
-// MethodInfo::toJson Tests
-// =============================================================================
 
 TEST(IntrospectionTest, MethodInfo_ToJson) {
     MethodInfo method;
@@ -281,6 +246,5 @@ TEST(IntrospectionTest, MethodInfo_ToJson_NoParameters) {
     QJsonObject json = method.toJson();
     
     EXPECT_EQ(json["name"].toString().toStdString(), "noParamMethod");
-    // Empty parameters shouldn't be in JSON
     EXPECT_FALSE(json.contains("parameters"));
 }

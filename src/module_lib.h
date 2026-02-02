@@ -11,8 +11,7 @@
  * 
  * Main components:
  * - ModuleMetadata: Plugin metadata extraction and storage
- * - ModuleLoader/ModuleHandle: Plugin loading and lifecycle management
- * - ModuleIntrospection: Runtime method introspection
+ * - LogosModule: Plugin loading, lifecycle management, and runtime introspection
  * 
  * Example usage:
  * @code
@@ -22,32 +21,29 @@
  * 
  * // Load a plugin
  * QString error;
- * auto handle = ModuleLoader::loadFromPath("/path/to/plugin.so", &error);
- * if (!handle.isValid()) {
+ * LogosModule plugin = LogosModule::loadFromPath("/path/to/plugin.so", &error);
+ * if (!plugin.isValid()) {
  *     qCritical() << "Failed to load:" << error;
  *     return;
  * }
  * 
  * // Access metadata
- * qDebug() << "Plugin name:" << handle.metadata().name;
- * qDebug() << "Plugin version:" << handle.metadata().version;
+ * qDebug() << "Plugin name:" << plugin.metadata().name;
+ * qDebug() << "Plugin version:" << plugin.metadata().version;
  * 
  * // Cast to interface
- * auto* plugin = handle.as<PluginInterface>();
- * if (plugin) {
+ * auto* iface = plugin.as<PluginInterface>();
+ * if (iface) {
  *     // Use plugin...
  * }
  * 
  * // Introspect methods
- * auto methods = ModuleIntrospection::getMethods(handle.instance());
- * for (const auto& method : methods) {
- *     qDebug() << "Method:" << method.name << method.signature;
- * }
+ * QJsonArray methods = plugin.getMethodsAsJson();
+ * QString className = plugin.getClassName();
  * @endcode
  */
 
 #include "module_metadata.h"
-#include "module_loader.h"
-#include "module_introspection.h"
+#include "logos_module.h"
 
 #endif // MODULE_LIB_H
