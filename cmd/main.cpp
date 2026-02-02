@@ -8,20 +8,16 @@
 #include <vector>
 #include <string>
 
-#include "module_loader.h"
+#include "logos_module.h"
 #include "module_metadata.h"
-#include "module_introspection.h"
 
 using namespace ModuleLib;
 
-// Output streams
 QTextStream out(stdout);
 QTextStream err(stderr);
 
-// Version
 const char* VERSION = "0.1.0";
 
-// Helper functions
 void printVersion() {
     out << "lm (Logos Module) version " << VERSION << Qt::endl;
 }
@@ -127,32 +123,29 @@ void printMethodsHuman(const std::vector<MethodInfo>& methods) {
 }
 
 void printMethodsJson(QObject* plugin) {
-    QJsonArray methodsArray = ModuleIntrospection::getMethodsAsJson(plugin);
+    QJsonArray methodsArray = LogosModule::getMethodsAsJson(plugin);
     QJsonDocument doc(methodsArray);
     out << doc.toJson(QJsonDocument::Indented);
 }
 
 int cmdMetadata(const QString& pluginPath, bool jsonOutput) {
-    // Resolve to absolute path
     QFileInfo fileInfo(pluginPath);
     QString absolutePath = fileInfo.absoluteFilePath();
     
-    // Check if file exists
     if (!fileInfo.exists()) {
         err << "Error: Plugin file not found: " << pluginPath << Qt::endl;
         return 1;
     }
     
-    // Load the plugin
     QString errorString;
-    ModuleHandle handle = ModuleLoader::loadFromPath(absolutePath, &errorString);
+    LogosModule plugin = LogosModule::loadFromPath(absolutePath, &errorString);
     
-    if (!handle.isValid()) {
+    if (!plugin.isValid()) {
         err << "Error: Failed to load plugin: " << errorString << Qt::endl;
         return 1;
     }
     
-    const ModuleMetadata& metadata = handle.metadata();
+    const ModuleMetadata& metadata = plugin.metadata();
     
     if (jsonOutput) {
         printMetadataJson(metadata);
@@ -164,34 +157,31 @@ int cmdMetadata(const QString& pluginPath, bool jsonOutput) {
 }
 
 int cmdMethods(const QString& pluginPath, bool jsonOutput) {
-    // Resolve to absolute path
     QFileInfo fileInfo(pluginPath);
     QString absolutePath = fileInfo.absoluteFilePath();
     
-    // Check if file exists
     if (!fileInfo.exists()) {
         err << "Error: Plugin file not found: " << pluginPath << Qt::endl;
         return 1;
     }
     
-    // Load the plugin
     QString errorString;
-    ModuleHandle handle = ModuleLoader::loadFromPath(absolutePath, &errorString);
+    LogosModule plugin = LogosModule::loadFromPath(absolutePath, &errorString);
     
-    if (!handle.isValid()) {
+    if (!plugin.isValid()) {
         err << "Error: Failed to load plugin: " << errorString << Qt::endl;
         return 1;
     }
     
-    if (!handle.instance()) {
+    if (!plugin.instance()) {
         err << "Error: Plugin loaded but instance is null" << Qt::endl;
         return 1;
     }
     
     if (jsonOutput) {
-        printMethodsJson(handle.instance());
+        printMethodsJson(plugin.instance());
     } else {
-        auto methods = ModuleIntrospection::getMethods(handle.instance());
+        auto methods = plugin.getMethods();
         printMethodsHuman(methods);
     }
     
@@ -201,19 +191,16 @@ int cmdMethods(const QString& pluginPath, bool jsonOutput) {
 int main(int argc, char* argv[]) {
     QCoreApplication app(argc, argv);
     
-    // Parse arguments manually
     std::vector<std::string> args;
     for (int i = 1; i < argc; ++i) {
         args.push_back(argv[i]);
     }
     
-    // Handle no arguments
     if (args.empty()) {
         printUsage();
         return 0;
     }
     
-    // Check for global flags
     std::string firstArg = args[0];
     
     if (firstArg == "--version" || firstArg == "-v") {
@@ -226,19 +213,16 @@ int main(int argc, char* argv[]) {
         return 0;
     }
     
-    // Parse command and options
     std::string command = firstArg;
     bool jsonOutput = false;
     QString pluginPath;
     
-    // Check for valid command
     if (command != "metadata" && command != "methods") {
         err << "Error: Unknown command '" << QString::fromStdString(command) << "'\n"
             << "\nRun 'lm --help' to see available commands.\n";
         return 1;
     }
     
-    // Parse remaining arguments
     for (size_t i = 1; i < args.size(); ++i) {
         std::string arg = args[i];
         
@@ -251,7 +235,6 @@ int main(int argc, char* argv[]) {
             err << "Error: Unknown option '" << QString::fromStdString(arg) << "'" << Qt::endl;
             return 1;
         } else {
-            // This should be the plugin path
             if (pluginPath.isEmpty()) {
                 pluginPath = QString::fromStdString(arg);
             } else {
@@ -261,14 +244,12 @@ int main(int argc, char* argv[]) {
         }
     }
     
-    // Check if plugin path was provided
     if (pluginPath.isEmpty()) {
         err << "Error: Missing plugin path" << Qt::endl;
         err << "\nUsage: lm " << QString::fromStdString(command) << " [options] <plugin-path>" << Qt::endl;
         return 1;
     }
     
-    // Execute command
     if (command == "metadata") {
         return cmdMetadata(pluginPath, jsonOutput);
     } else if (command == "methods") {

@@ -11,14 +11,12 @@ find_package(Qt6 REQUIRED COMPONENTS Core)
 # Define source files
 set(MODULE_LIB_SOURCES
     src/module_metadata.cpp
-    src/module_loader.cpp
-    src/module_introspection.cpp
+    src/logos_module.cpp
 )
 
 set(MODULE_LIB_HEADERS
     src/module_metadata.h
-    src/module_loader.h
-    src/module_introspection.h
+    src/logos_module.h
     src/module_lib.h
 )
 

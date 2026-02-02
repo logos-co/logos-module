@@ -42,7 +42,6 @@ ModuleMetadata ModuleMetadata::fromCustomMetadata(const QJsonObject& customMetad
     result.type = customMetadata.value("type").toString();
     result.rawMetadata = customMetadata;
     
-    // Parse dependencies array
     QJsonArray depsArray = customMetadata.value("dependencies").toArray();
     for (const QJsonValue& dep : depsArray) {
         QString depName = dep.toString();
