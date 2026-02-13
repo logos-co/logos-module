@@ -200,12 +200,12 @@ TEST_F(CLITest, MethodsHelp_ShowsCommandHelp) {
 // Error Handling Tests
 // =============================================================================
 
-TEST_F(CLITest, UnknownCommand_ReturnsError) {
+TEST_F(CLITest, DefaultMode_NonExistentPath_ReturnsError) {
     auto result = runCommand("unknown_command");
     
     EXPECT_NE(result.exitCode, 0);
     EXPECT_NE(result.output.find("Error"), std::string::npos);
-    EXPECT_NE(result.output.find("Unknown command"), std::string::npos);
+    EXPECT_NE(result.output.find("not found"), std::string::npos);
 }
 
 TEST_F(CLITest, MetadataMissingPath_ReturnsError) {

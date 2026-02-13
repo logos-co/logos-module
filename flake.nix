@@ -37,6 +37,11 @@
           # lm binary package
           lm = bin;
           
+          # Additional aliases for the binary
+          cli = bin;
+          bin = bin;
+          cmd = bin;
+
           # logos-module library
           lib = lib;
           

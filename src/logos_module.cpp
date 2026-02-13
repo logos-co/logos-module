@@ -1,7 +1,6 @@
 #include "logos_module.h"
 #include <QMetaObject>
 #include <QMetaMethod>
-#include <QDebug>
 
 namespace ModuleLib {
 
@@ -93,8 +92,6 @@ LogosModule LogosModule::loadFromPath(const QString& pluginPath, QString* errorS
         return module;
     }
     
-    qDebug() << "LogosModule: Plugin loaded successfully:" << pluginPath;
-    
     return module;
 }
 
@@ -102,7 +99,6 @@ std::vector<LogosModule> LogosModule::getStaticModules() {
     std::vector<LogosModule> modules;
     
     const QObjectList staticPlugins = QPluginLoader::staticInstances();
-    qDebug() << "LogosModule: Found" << staticPlugins.size() << "static plugin instances";
     
     for (QObject* pluginObject : staticPlugins) {
         if (!pluginObject) {
