@@ -1,7 +1,6 @@
 #include "module_metadata.h"
 #include <QPluginLoader>
 #include <QJsonArray>
-#include <QDebug>
 
 namespace ModuleLib {
 
