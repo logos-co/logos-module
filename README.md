@@ -32,13 +32,20 @@ nix build .#all
 
 ## Using the `lm` Binary
 
-Show plugin metadata:
+Show both metadata and methods (default):
+```bash
+lm /path/to/plugin.dylib
+lm /path/to/plugin.dylib --json
+lm /path/to/plugin.dylib --debug
+```
+
+Show plugin metadata only:
 ```bash
 lm metadata /path/to/plugin.dylib
 lm metadata /path/to/plugin.dylib --json
 ```
 
-Show plugin methods:
+Show plugin methods only:
 ```bash
 lm methods /path/to/plugin.dylib
 lm methods /path/to/plugin.dylib --json
