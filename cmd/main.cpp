@@ -61,9 +61,10 @@ void printVersion() {
 void printUsage() {
     out << "lm - Logos Module Inspector\n"
         << "\n"
-        << "Usage: lm <command> [options] <plugin-path>\n"
+        << "Usage: lm [command] [options] <plugin-path>\n"
         << "\n"
         << "Commands:\n"
+        << "  (default)   Show both metadata and methods (when no command specified)\n"
         << "  metadata    Show plugin metadata (name, version, description, etc.)\n"
         << "  methods     Show plugin methods and signatures\n"
         << "\n"
@@ -74,6 +75,8 @@ void printUsage() {
         << "  --version, -v  Show version information\n"
         << "\n"
         << "Examples:\n"
+        << "  lm /path/to/plugin.so\n"
+        << "  lm /path/to/plugin.so --json\n"
         << "  lm metadata /path/to/plugin.so\n"
         << "  lm methods /path/to/plugin.so\n"
         << "  lm metadata /path/to/plugin.so --json\n"
@@ -252,6 +255,94 @@ int cmdMethods(const QString& pluginPath, bool jsonOutput, bool debugOutput) {
     return 0;
 }
 
+int cmdInfo(const QString& pluginPath, bool jsonOutput, bool debugOutput) {
+    QFileInfo fileInfo(pluginPath);
+    QString absolutePath = fileInfo.absoluteFilePath();
+    
+    if (!fileInfo.exists()) {
+        err << "Error: Plugin file not found: " << pluginPath << Qt::endl;
+        return 1;
+    }
+    
+    if (jsonOutput) {
+        // For JSON output, combine metadata and methods into a single object
+        auto metadata = LogosModule::extractMetadata(absolutePath);
+        if (!metadata) {
+            err << "Error: Failed to extract metadata from: " << pluginPath << Qt::endl;
+            return 1;
+        }
+        
+        // Load plugin for methods
+        QString errorString;
+        LogosModule plugin;
+        
+        if (!debugOutput) {
+            // Suppress output during loading
+            int stdout_copy = dup(STDOUT_FILENO);
+            int stderr_copy = dup(STDERR_FILENO);
+            
+            int devnull = open("/dev/null", O_WRONLY);
+            if (devnull != -1) {
+                dup2(devnull, STDOUT_FILENO);
+                dup2(devnull, STDERR_FILENO);
+                close(devnull);
+            }
+            
+            plugin = LogosModule::loadFromPath(absolutePath, &errorString);
+            
+            if (stdout_copy != -1) {
+                dup2(stdout_copy, STDOUT_FILENO);
+                close(stdout_copy);
+            }
+            if (stderr_copy != -1) {
+                dup2(stderr_copy, STDERR_FILENO);
+                close(stderr_copy);
+            }
+        } else {
+            plugin = LogosModule::loadFromPath(absolutePath, &errorString);
+        }
+        
+        if (!plugin.isValid()) {
+            err << "Error: Failed to load plugin: " << errorString << Qt::endl;
+            return 1;
+        }
+        
+        // Build combined JSON object
+        QJsonObject combined;
+        
+        QJsonObject metadataObj;
+        metadataObj["name"] = metadata->name;
+        metadataObj["version"] = metadata->version;
+        metadataObj["description"] = metadata->description;
+        metadataObj["author"] = metadata->author;
+        metadataObj["type"] = metadata->type;
+        
+        QJsonArray deps;
+        for (const QString& dep : metadata->dependencies) {
+            deps.append(dep);
+        }
+        metadataObj["dependencies"] = deps;
+        
+        combined["metadata"] = metadataObj;
+        combined["methods"] = LogosModule::getMethodsAsJson(plugin.instance());
+        
+        QJsonDocument doc(combined);
+        out << doc.toJson(QJsonDocument::Indented);
+    } else {
+        // For human-readable output, print metadata then methods with a separator
+        int result = cmdMetadata(pluginPath, false);
+        if (result != 0) {
+            return result;
+        }
+        
+        out << "\n";
+        
+        return cmdMethods(pluginPath, false, debugOutput);
+    }
+    
+    return 0;
+}
+
 int main(int argc, char* argv[]) {
     QCoreApplication app(argc, argv);
     
@@ -280,22 +371,35 @@ int main(int argc, char* argv[]) {
         return 0;
     }
     
-    std::string command = firstArg;
+    std::string command;
+    bool defaultMode = false;
     bool jsonOutput = false;
     bool debugOutput = false;
     QString pluginPath;
     
-    if (command != "metadata" && command != "methods") {
-        err << "Error: Unknown command '" << QString::fromStdString(command) << "'\n"
-            << "\nRun 'lm --help' to see available commands.\n";
+    // Check if first arg is a command or a plugin path
+    if (firstArg == "metadata" || firstArg == "methods") {
+        command = firstArg;
+    } else if (firstArg[0] != '-') {
+        // First arg is not a command and not an option, treat as plugin path
+        defaultMode = true;
+        pluginPath = QString::fromStdString(firstArg);
+    } else {
+        err << "Error: Unknown option '" << QString::fromStdString(firstArg) << "'" << Qt::endl;
         return 1;
     }
     
-    for (size_t i = 1; i < args.size(); ++i) {
+    // Parse remaining arguments
+    size_t startIdx = defaultMode ? 1 : 1;  // Start after command or plugin path
+    for (size_t i = startIdx; i < args.size(); ++i) {
         std::string arg = args[i];
         
         if (arg == "--help" || arg == "-h") {
-            printCommandHelp(QString::fromStdString(command));
+            if (defaultMode) {
+                printUsage();
+            } else {
+                printCommandHelp(QString::fromStdString(command));
+            }
             return 0;
         } else if (arg == "--json") {
             jsonOutput = true;
@@ -316,14 +420,20 @@ int main(int argc, char* argv[]) {
     
     if (pluginPath.isEmpty()) {
         err << "Error: Missing plugin path" << Qt::endl;
-        err << "\nUsage: lm " << QString::fromStdString(command) << " [options] <plugin-path>" << Qt::endl;
+        if (defaultMode) {
+            err << "\nUsage: lm [options] <plugin-path>" << Qt::endl;
+        } else {
+            err << "\nUsage: lm " << QString::fromStdString(command) << " [options] <plugin-path>" << Qt::endl;
+        }
         return 1;
     }
     
     // Set global debug flag
     g_debugMode = debugOutput;
     
-    if (command == "metadata") {
+    if (defaultMode) {
+        return cmdInfo(pluginPath, jsonOutput, debugOutput);
+    } else if (command == "metadata") {
         return cmdMetadata(pluginPath, jsonOutput);
     } else if (command == "methods") {
         return cmdMethods(pluginPath, jsonOutput, debugOutput);
