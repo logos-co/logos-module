@@ -6,7 +6,7 @@ pkgs.stdenv.mkDerivation {
   version = common.version;
   
   inherit src;
-  inherit (common) nativeBuildInputs buildInputs cmakeFlags meta;
+  inherit (common) nativeBuildInputs buildInputs cmakeFlags meta QTDIR;
   
   # Don't wrap Qt apps since this is a library
   dontWrapQtApps = true;

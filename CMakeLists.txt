@@ -5,7 +5,10 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
-# Find Qt6
+# Find Qt6 — use QTDIR environment variable if set
+if(DEFINED ENV{QTDIR})
+    list(PREPEND CMAKE_PREFIX_PATH $ENV{QTDIR})
+endif()
 find_package(Qt6 REQUIRED COMPONENTS Core)
 
 # Define source files

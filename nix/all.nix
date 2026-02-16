@@ -7,7 +7,7 @@ pkgs.stdenv.mkDerivation {
   version = common.version;
   
   inherit src;
-  inherit (common) nativeBuildInputs buildInputs meta;
+  inherit (common) nativeBuildInputs buildInputs meta QTDIR;
   
   # Don't wrap Qt apps
   dontWrapQtApps = true;
