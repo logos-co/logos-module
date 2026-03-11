@@ -56,6 +56,15 @@
         }
       );
 
+      checks = forAllSystems ({ pkgs }:
+        let
+          common = import ./nix/default.nix { inherit pkgs; };
+          src = ./.;
+        in {
+          tests = import ./nix/all.nix { inherit pkgs common src; skipPluginTests = true; };
+        }
+      );
+
       devShells = forAllSystems ({ pkgs }: {
         default = pkgs.mkShell {
           nativeBuildInputs = [
