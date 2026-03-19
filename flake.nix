@@ -2,12 +2,13 @@
   description = "Logos Module Library - Qt plugin system abstraction layer";
 
   inputs = {
+    logos-nix.url = "github:logos-co/logos-nix";
     # Follow the same nixpkgs as logos-cpp-sdk to ensure compatibility
-    nixpkgs.follows = "logos-cpp-sdk/nixpkgs";
+    nixpkgs.follows = "logos-nix/nixpkgs";
     logos-cpp-sdk.url = "github:logos-co/logos-cpp-sdk";
   };
 
-  outputs = { self, nixpkgs, logos-cpp-sdk }:
+  outputs = { self, nixpkgs, logos-nix, logos-cpp-sdk }:
     let
       systems = [ "aarch64-darwin" "x86_64-darwin" "aarch64-linux" "x86_64-linux" ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f {
