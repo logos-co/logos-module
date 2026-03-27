@@ -26,5 +26,6 @@ jobs:
     - name: Run tests
       run: |
         export LM_BINARY="$(pwd)/result/bin/lm"
+        export TEST_PLUGIN="$(pwd)/tests/examples/package_manager_plugin.so"
         # Skip CLIPluginTest: pre-compiled test plugins have architecture issues in github actions
         ./result/bin/logos_module_tests --gtest_filter=-CLIPluginTest.*

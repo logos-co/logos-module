@@ -21,6 +21,7 @@ protected:
             lmBinary = envBinary;
         } else {
             // Try to find the binary in common build locations
+            // TODO: this is dumb, fix
             std::vector<std::string> possiblePaths = {
                 // CMake build paths
                 "./lm",
