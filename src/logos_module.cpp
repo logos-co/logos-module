@@ -136,6 +136,26 @@ std::optional<ModuleMetadata> LogosModule::extractMetadata(const QString& plugin
     return ModuleMetadata::fromPath(pluginPath);
 }
 
+std::string LogosModule::getModuleName(const std::string& pluginPath) {
+    auto metadata = extractMetadata(QString::fromStdString(pluginPath));
+    if (!metadata || !metadata->isValid()) {
+        return {};
+    }
+    return metadata->name.toStdString();
+}
+
+std::vector<std::string> LogosModule::getModuleDependencies(const std::string& pluginPath) {
+    auto metadata = extractMetadata(QString::fromStdString(pluginPath));
+    if (!metadata) {
+        return {};
+    }
+    std::vector<std::string> result;
+    for (const QString& dep : metadata->dependencies) {
+        result.push_back(dep.toStdString());
+    }
+    return result;
+}
+
 bool LogosModule::isValid() const {
     return m_instance != nullptr;
 }

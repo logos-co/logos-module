@@ -1,6 +1,9 @@
 #include <gtest/gtest.h>
 #include "module_metadata.h"
+#include "logos_module.h"
 #include <QJsonArray>
+#include <string>
+#include <vector>
 
 using namespace ModuleLib;
 
@@ -173,4 +176,95 @@ TEST(MetadataTest, IsValid_DefaultConstructed) {
     ModuleMetadata metadata;
     
     EXPECT_FALSE(metadata.isValid());
+}
+
+// =============================================================================
+// getModuleName Tests
+// =============================================================================
+
+TEST(GetModuleNameTest, NonExistentPath_ReturnsEmpty) {
+    std::string name = LogosModule::getModuleName("/nonexistent/path/plugin.so");
+    EXPECT_TRUE(name.empty());
+}
+
+TEST(GetModuleNameTest, EmptyPath_ReturnsEmpty) {
+    std::string name = LogosModule::getModuleName("");
+    EXPECT_TRUE(name.empty());
+}
+
+TEST(GetModuleNameTest, InvalidFile_ReturnsEmpty) {
+    std::string name = LogosModule::getModuleName("/dev/null");
+    EXPECT_TRUE(name.empty());
+}
+
+// =============================================================================
+// getModuleDependencies Tests
+// =============================================================================
+
+TEST(GetModuleDependenciesTest, NonExistentPath_ReturnsEmpty) {
+    std::vector<std::string> deps = LogosModule::getModuleDependencies("/nonexistent/path/plugin.so");
+    EXPECT_TRUE(deps.empty());
+}
+
+TEST(GetModuleDependenciesTest, EmptyPath_ReturnsEmpty) {
+    std::vector<std::string> deps = LogosModule::getModuleDependencies("");
+    EXPECT_TRUE(deps.empty());
+}
+
+TEST(GetModuleDependenciesTest, InvalidFile_ReturnsEmpty) {
+    std::vector<std::string> deps = LogosModule::getModuleDependencies("/dev/null");
+    EXPECT_TRUE(deps.empty());
+}
+
+// =============================================================================
+// Real Plugin Tests for getModuleName / getModuleDependencies
+// =============================================================================
+
+class RealPluginMetadataTest : public ::testing::Test {
+protected:
+    std::string testPlugin;
+
+    void SetUp() override {
+#ifdef __APPLE__
+        std::string pluginName = "package_manager_plugin.dylib";
+#else
+        std::string pluginName = "package_manager_plugin.so";
+#endif
+
+        const char* envPlugin = std::getenv("TEST_PLUGIN");
+        if (envPlugin && std::string(envPlugin).length() > 0) {
+            testPlugin = envPlugin;
+        } else {
+            // TODO: this is dumb, fix
+            std::vector<std::string> possiblePaths = {
+                "tests/examples/" + pluginName,
+                "./tests/examples/" + pluginName,
+                "../tests/examples/" + pluginName,
+                "../../tests/examples/" + pluginName,
+                "../../../tests/examples/" + pluginName,
+                "examples/" + pluginName,
+            };
+
+            for (const auto& path : possiblePaths) {
+                if (std::system(("test -f " + path + " 2>/dev/null").c_str()) == 0) {
+                    testPlugin = path;
+                    break;
+                }
+            }
+        }
+
+        if (testPlugin.empty()) {
+            GTEST_SKIP() << "Test plugin not found. Set TEST_PLUGIN environment variable.";
+        }
+    }
+};
+
+TEST_F(RealPluginMetadataTest, GetModuleName_ReturnsCorrectName) {
+    std::string name = LogosModule::getModuleName(testPlugin);
+    EXPECT_EQ(name, "package_manager");
+}
+
+TEST_F(RealPluginMetadataTest, GetModuleDependencies_ReturnsEmptyForNoDeps) {
+    std::vector<std::string> deps = LogosModule::getModuleDependencies(testPlugin);
+    EXPECT_TRUE(deps.empty());
 }

@@ -9,6 +9,7 @@
 #include <QObject>
 #include <QPluginLoader>
 #include <memory>
+#include <string>
 #include <vector>
 #include <optional>
 
@@ -113,6 +114,22 @@ public:
      * @return std::optional<ModuleMetadata> The metadata if extraction succeeded
      */
     static std::optional<ModuleMetadata> extractMetadata(const QString& pluginPath);
+    
+    /**
+     * @brief Get just the module name from a plugin file without loading it.
+     * 
+     * @param pluginPath Path to the plugin file
+     * @return std::string The module name, or empty string if extraction failed
+     */
+    static std::string getModuleName(const std::string& pluginPath);
+    
+    /**
+     * @brief Get the dependency list from a plugin file without loading it.
+     * 
+     * @param pluginPath Path to the plugin file
+     * @return std::vector<std::string> The list of dependency names, or empty list if extraction failed
+     */
+    static std::vector<std::string> getModuleDependencies(const std::string& pluginPath);
     
     /**
      * @brief Check if the handle contains a valid loaded plugin
