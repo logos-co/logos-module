@@ -1,7 +1,9 @@
 #include <gtest/gtest.h>
 #include "logos_module.h"
+#include "logos_provider_plugin.h"
 #include <QCoreApplication>
 #include <QJsonDocument>
+#include <QJsonObject>
 
 using namespace ModuleLib;
 
@@ -27,7 +29,86 @@ public slots:
     QString slotWithReturn(int x) { return QString::number(x * 2); }
 };
 
+// ---------------------------------------------------------------------------
+// Mock for new-API (LogosProviderPlugin) path
+// ---------------------------------------------------------------------------
+
+class MockProviderObject : public LogosProviderObject {
+public:
+    QVariant callMethod(const QString&, const QVariantList&) override { return {}; }
+    bool informModuleToken(const QString&, const QString&) override { return true; }
+    QJsonArray getMethods() override {
+        QJsonArray methods;
+        {
+            QJsonObject m;
+            m["name"] = "providerMethod";
+            m["signature"] = "providerMethod(QString)";
+            m["returnType"] = "QString";
+            m["isInvokable"] = true;
+            QJsonArray params;
+            params.append(QJsonObject{{"type", "QString"}, {"name", "input"}});
+            m["parameters"] = params;
+            methods.append(m);
+        }
+        {
+            QJsonObject m;
+            m["name"] = "noArgMethod";
+            m["signature"] = "noArgMethod()";
+            m["returnType"] = "bool";
+            m["isInvokable"] = true;
+            methods.append(m);
+        }
+        {
+            QJsonObject m;
+            m["name"] = "multiParam";
+            m["signature"] = "multiParam(QString,int,bool)";
+            m["returnType"] = "void";
+            m["isInvokable"] = true;
+            QJsonArray params;
+            params.append(QJsonObject{{"type", "QString"}, {"name", "name"}});
+            params.append(QJsonObject{{"type", "int"}, {"name", "count"}});
+            params.append(QJsonObject{{"type", "bool"}, {"name", "flag"}});
+            m["parameters"] = params;
+            methods.append(m);
+        }
+        return methods;
+    }
+    void setEventListener(EventCallback) override {}
+    void init(void*) override {}
+    QString providerName() const override { return "mock_provider"; }
+    QString providerVersion() const override { return "1.0.0"; }
+};
+
+class MockNewApiPlugin : public QObject, public LogosProviderPlugin {
+    Q_OBJECT
+    Q_INTERFACES(LogosProviderPlugin)
+public:
+    explicit MockNewApiPlugin(QObject* parent = nullptr) : QObject(parent) {}
+    LogosProviderObject* createProviderObject() override {
+        return new MockProviderObject();
+    }
+};
+
+// A new-API plugin that returns null from createProviderObject —
+// should fall back to the legacy QMetaObject path
+class MockBrokenNewApiPlugin : public QObject, public LogosProviderPlugin {
+    Q_OBJECT
+    Q_INTERFACES(LogosProviderPlugin)
+public:
+    explicit MockBrokenNewApiPlugin(QObject* parent = nullptr) : QObject(parent) {}
+    LogosProviderObject* createProviderObject() override {
+        return nullptr;
+    }
+
+    // Legacy Q_INVOKABLE method — should be found via fallback
+    Q_INVOKABLE QString legacyMethod() { return "legacy"; }
+};
+
 #include "test_introspection.moc"
+
+// ---------------------------------------------------------------------------
+// Legacy Q_INVOKABLE tests (existing)
+// ---------------------------------------------------------------------------
 
 TEST(IntrospectionTest, GetMethods_ReturnsPluginMethods) {
     MockPlugin plugin;
@@ -247,4 +328,138 @@ TEST(IntrospectionTest, MethodInfo_ToJson_NoParameters) {
     
     EXPECT_EQ(json["name"].toString().toStdString(), "noParamMethod");
     EXPECT_FALSE(json.contains("parameters"));
+}
+
+// ---------------------------------------------------------------------------
+// New-API (LogosProviderPlugin) introspection tests
+// ---------------------------------------------------------------------------
+
+TEST(ProviderPluginIntrospectionTest, GetMethods_ReturnsProviderMethods) {
+    MockNewApiPlugin plugin;
+
+    auto methods = LogosModule::getMethods(&plugin);
+
+    ASSERT_EQ(methods.size(), 3);
+
+    EXPECT_EQ(methods[0].name, "providerMethod");
+    EXPECT_EQ(methods[0].returnType, "QString");
+    EXPECT_EQ(methods[0].signature, "providerMethod(QString)");
+    EXPECT_TRUE(methods[0].isInvokable);
+    ASSERT_EQ(methods[0].parameters.size(), 1);
+    EXPECT_EQ(methods[0].parameters[0].name, "input");
+    EXPECT_EQ(methods[0].parameters[0].type, "QString");
+
+    EXPECT_EQ(methods[1].name, "noArgMethod");
+    EXPECT_EQ(methods[1].returnType, "bool");
+    EXPECT_TRUE(methods[1].parameters.empty());
+
+    EXPECT_EQ(methods[2].name, "multiParam");
+    EXPECT_EQ(methods[2].returnType, "void");
+    ASSERT_EQ(methods[2].parameters.size(), 3);
+    EXPECT_EQ(methods[2].parameters[0].name, "name");
+    EXPECT_EQ(methods[2].parameters[1].name, "count");
+    EXPECT_EQ(methods[2].parameters[2].name, "flag");
+}
+
+TEST(ProviderPluginIntrospectionTest, GetMethods_DoesNotReturnQObjectMethods) {
+    MockNewApiPlugin plugin;
+
+    auto methods = LogosModule::getMethods(&plugin);
+
+    // New-API path returns exactly what the provider reports — no QObject base methods
+    for (const auto& m : methods) {
+        EXPECT_NE(m.name, "deleteLater");
+        EXPECT_NE(m.name, "objectName");
+        EXPECT_NE(m.name, "destroyed");
+    }
+}
+
+TEST(ProviderPluginIntrospectionTest, GetMethodsAsJson_ReturnsProviderJson) {
+    MockNewApiPlugin plugin;
+
+    QJsonArray methodsJson = LogosModule::getMethodsAsJson(&plugin);
+
+    ASSERT_EQ(methodsJson.size(), 3);
+
+    QJsonObject first = methodsJson[0].toObject();
+    EXPECT_EQ(first["name"].toString(), "providerMethod");
+    EXPECT_EQ(first["returnType"].toString(), "QString");
+    EXPECT_EQ(first["signature"].toString(), "providerMethod(QString)");
+    EXPECT_TRUE(first["isInvokable"].toBool());
+    ASSERT_TRUE(first.contains("parameters"));
+    EXPECT_EQ(first["parameters"].toArray().size(), 1);
+}
+
+TEST(ProviderPluginIntrospectionTest, GetMethodsAsJson_MatchesGetMethods) {
+    MockNewApiPlugin plugin;
+
+    auto methods = LogosModule::getMethods(&plugin);
+    QJsonArray methodsJson = LogosModule::getMethodsAsJson(&plugin);
+
+    // Both paths should return the same number of methods
+    ASSERT_EQ(static_cast<int>(methods.size()), methodsJson.size());
+
+    // Names should match
+    for (int i = 0; i < methodsJson.size(); ++i) {
+        EXPECT_EQ(methods[i].name, methodsJson[i].toObject()["name"].toString());
+    }
+}
+
+TEST(ProviderPluginIntrospectionTest, ExcludeBaseClass_Ignored) {
+    MockNewApiPlugin plugin;
+
+    // excludeBaseClass flag has no effect on new-API path (there is no QMetaObject)
+    auto withExclude = LogosModule::getMethods(&plugin, true);
+    auto withoutExclude = LogosModule::getMethods(&plugin, false);
+
+    EXPECT_EQ(withExclude.size(), withoutExclude.size());
+}
+
+TEST(ProviderPluginIntrospectionTest, BrokenProvider_FallsBackToLegacy) {
+    MockBrokenNewApiPlugin plugin;
+
+    // createProviderObject() returns nullptr, so getMethods should
+    // fall through to the legacy QMetaObject path
+    auto methods = LogosModule::getMethods(&plugin);
+
+    bool foundLegacyMethod = false;
+    for (const auto& m : methods) {
+        if (m.name == "legacyMethod") foundLegacyMethod = true;
+    }
+    EXPECT_TRUE(foundLegacyMethod);
+}
+
+TEST(ProviderPluginIntrospectionTest, BrokenProvider_FallsBackToLegacyJson) {
+    MockBrokenNewApiPlugin plugin;
+
+    QJsonArray methodsJson = LogosModule::getMethodsAsJson(&plugin);
+
+    bool foundLegacyMethod = false;
+    for (const QJsonValue& v : methodsJson) {
+        if (v.toObject()["name"].toString() == "legacyMethod")
+            foundLegacyMethod = true;
+    }
+    EXPECT_TRUE(foundLegacyMethod);
+}
+
+TEST(ProviderPluginIntrospectionTest, HasMethod_WorksWithProvider) {
+    MockNewApiPlugin plugin;
+
+    EXPECT_TRUE(LogosModule::hasMethod(&plugin, "providerMethod"));
+    EXPECT_TRUE(LogosModule::hasMethod(&plugin, "noArgMethod"));
+    EXPECT_TRUE(LogosModule::hasMethod(&plugin, "multiParam"));
+    EXPECT_FALSE(LogosModule::hasMethod(&plugin, "nonExistent"));
+}
+
+TEST(ProviderPluginIntrospectionTest, LegacyPlugin_StillWorks) {
+    // Verify the legacy path is unaffected by the new-API code
+    MockPlugin legacyPlugin;
+
+    auto methods = LogosModule::getMethods(&legacyPlugin, true);
+
+    bool foundTestMethod = false;
+    for (const auto& m : methods) {
+        if (m.name == "testMethod") foundTestMethod = true;
+    }
+    EXPECT_TRUE(foundTestMethod);
 }

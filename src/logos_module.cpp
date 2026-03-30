@@ -1,4 +1,5 @@
 #include "logos_module.h"
+#include "logos_provider_plugin.h"
 #include <QMetaObject>
 #include <QMetaMethod>
 
@@ -209,12 +210,40 @@ bool LogosModule::hasMethod(const QString& methodName) const {
 
 std::vector<MethodInfo> LogosModule::getMethods(QObject* obj, bool excludeBaseClass) {
     std::vector<MethodInfo> methods;
-    
+
     if (!obj) {
         qWarning() << "LogosModule: Null object for introspection";
         return methods;
     }
-    
+
+    // New-API: detect LogosProviderPlugin and use getMethods() from provider
+    LogosProviderPlugin* providerPlugin = qobject_cast<LogosProviderPlugin*>(obj);
+    if (providerPlugin) {
+        LogosProviderObject* provider = providerPlugin->createProviderObject();
+        if (provider) {
+            QJsonArray jsonMethods = provider->getMethods();
+            for (const QJsonValue& v : jsonMethods) {
+                QJsonObject mo = v.toObject();
+                MethodInfo info;
+                info.name = mo["name"].toString();
+                info.signature = mo["signature"].toString();
+                info.returnType = mo["returnType"].toString();
+                info.isInvokable = mo["isInvokable"].toBool(true);
+                QJsonArray params = mo["parameters"].toArray();
+                for (const QJsonValue& pv : params) {
+                    QJsonObject po = pv.toObject();
+                    ParameterInfo param;
+                    param.name = po["name"].toString();
+                    param.type = po["type"].toString();
+                    info.parameters.push_back(param);
+                }
+                methods.push_back(info);
+            }
+            delete provider;
+            return methods;
+        }
+    }
+
     const QMetaObject* metaObject = obj->metaObject();
     
     for (int i = 0; i < metaObject->methodCount(); ++i) {
@@ -257,13 +286,24 @@ std::vector<MethodInfo> LogosModule::getMethods(QObject* obj, bool excludeBaseCl
 }
 
 QJsonArray LogosModule::getMethodsAsJson(QObject* obj, bool excludeBaseClass) {
+    // New-API: detect LogosProviderPlugin and use getMethods() directly
+    LogosProviderPlugin* providerPlugin = qobject_cast<LogosProviderPlugin*>(obj);
+    if (providerPlugin) {
+        LogosProviderObject* provider = providerPlugin->createProviderObject();
+        if (provider) {
+            QJsonArray result = provider->getMethods();
+            delete provider;
+            return result;
+        }
+    }
+
     QJsonArray methodsArray;
-    
+
     auto methods = getMethods(obj, excludeBaseClass);
     for (const auto& method : methods) {
         methodsArray.append(method.toJson());
     }
-    
+
     return methodsArray;
 }
 
