@@ -17,6 +17,7 @@ set(MODULE_LIB_SOURCES
 set(MODULE_LIB_HEADERS
     src/module_metadata.h
     src/logos_module.h
+    src/logos_provider_plugin.h
     src/module_lib.h
     src/interface.h
 )
