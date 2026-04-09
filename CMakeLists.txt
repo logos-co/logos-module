@@ -12,6 +12,7 @@ find_package(Qt6 REQUIRED COMPONENTS Core)
 set(MODULE_LIB_SOURCES
     src/module_metadata.cpp
     src/logos_module.cpp
+    src/instance_persistence.cpp
 )
 
 set(MODULE_LIB_HEADERS
@@ -20,6 +21,7 @@ set(MODULE_LIB_HEADERS
     src/logos_provider_plugin.h
     src/module_lib.h
     src/interface.h
+    src/instance_persistence.h
 )
 
 # Create the static library

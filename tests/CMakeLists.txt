@@ -4,6 +4,7 @@ add_executable(logos_module_tests
     test_metadata.cpp
     test_introspection.cpp
     test_cli.cpp
+    test_instance_persistence.cpp
 )
 
 # Link with appropriate GTest targets (handles both find_package and FetchContent)

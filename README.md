@@ -57,6 +57,43 @@ lm --help
 lm --version
 ```
 
+## Instance Persistence
+
+The library includes `ModuleLib::InstancePersistence`, a utility for assigning each module instance a unique ID and a dedicated persistence directory on disk.
+
+### Directory structure
+
+```
+{basePath}/{moduleName}/{instanceId}
+```
+
+### API
+
+```cpp
+#include <instance_persistence.h>
+
+using namespace ModuleLib::InstancePersistence;
+
+// Three resolution modes:
+//   ReuseOrCreate — pick the first existing instance dir, or create a new one
+//   AlwaysCreate  — always generate a fresh instance ID
+//   UseExplicit   — use a caller-provided instance ID
+
+// Default: ReuseOrCreate
+auto info = resolveInstance("/data", "my_module");
+
+// Force a new instance
+auto fresh = resolveInstance("/data", "my_module", ResolveMode::AlwaysCreate);
+
+// Use a specific ID
+auto exact = resolveInstance("/data", "my_module", ResolveMode::UseExplicit, "abc123");
+
+// info.instanceId       — 12-char hex string (e.g. "a1b2c3d4e5f6")
+// info.persistencePath  — full path: /data/my_module/a1b2c3d4e5f6
+```
+
+The directory is created on disk automatically. Returns empty strings on failure.
+
 ## Development
 
 ```bash
