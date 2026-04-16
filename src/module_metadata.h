@@ -5,6 +5,7 @@
 #include <QStringList>
 #include <QJsonObject>
 #include <optional>
+#include <string>
 
 namespace ModuleLib {
 
@@ -40,6 +41,14 @@ struct ModuleMetadata {
      * @return std::optional<ModuleMetadata> The metadata if extraction succeeded, std::nullopt otherwise
      */
     static std::optional<ModuleMetadata> fromPath(const QString& pluginPath);
+
+    /**
+     * @brief Extract metadata from a plugin file without fully loading it (std::string overload).
+     * 
+     * @param pluginPath Path to the plugin file
+     * @return std::optional<ModuleMetadata> The metadata if extraction succeeded, std::nullopt otherwise
+     */
+    static std::optional<ModuleMetadata> fromPath(const std::string& pluginPath);
     
     /**
      * @brief Create ModuleMetadata from a QJsonObject.

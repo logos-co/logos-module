@@ -88,6 +88,15 @@ public:
      * @return LogosModule Handle to the loaded plugin (check isValid())
      */
     static LogosModule loadFromPath(const QString& pluginPath, QString* errorString = nullptr);
+
+    /**
+     * @brief Load a plugin from a file path (std::string overload).
+     * 
+     * @param pluginPath Path to the plugin file (.so, .dylib, .dll)
+     * @param errorString Optional pointer to receive error message on failure
+     * @return LogosModule Handle to the loaded plugin (check isValid())
+     */
+    static LogosModule loadFromPath(const std::string& pluginPath, std::string* errorString = nullptr);
     
     /**
      * @brief Get all statically linked plugins.
@@ -114,6 +123,14 @@ public:
      * @return std::optional<ModuleMetadata> The metadata if extraction succeeded
      */
     static std::optional<ModuleMetadata> extractMetadata(const QString& pluginPath);
+
+    /**
+     * @brief Extract metadata from a plugin file without loading it (std::string overload).
+     * 
+     * @param pluginPath Path to the plugin file
+     * @return std::optional<ModuleMetadata> The metadata if extraction succeeded
+     */
+    static std::optional<ModuleMetadata> extractMetadata(const std::string& pluginPath);
     
     /**
      * @brief Get just the module name from a plugin file without loading it.
@@ -212,6 +229,14 @@ public:
      * @return bool True if the method exists
      */
     bool hasMethod(const QString& methodName) const;
+
+    /**
+     * @brief Check if the plugin has a method with the given name (std::string overload).
+     * 
+     * @param methodName The method name to look for
+     * @return bool True if the method exists
+     */
+    bool hasMethod(const std::string& methodName) const;
     
     /**
      * @brief Get all methods defined by an arbitrary QObject.

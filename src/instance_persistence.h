@@ -2,6 +2,7 @@
 #define INSTANCE_PERSISTENCE_H
 
 #include <QString>
+#include <string>
 
 /**
  * @brief Utilities for resolving per-module-instance persistence directories.
@@ -34,6 +35,11 @@ struct InstanceInfo {
     QString persistencePath;  // full path: basePath/moduleName/instanceId
 };
 
+struct StdInstanceInfo {
+    std::string instanceId;
+    std::string persistencePath;  // full path: basePath/moduleName/instanceId
+};
+
 /**
  * @brief Resolve (or create) an instance directory for the given module.
  *
@@ -51,6 +57,21 @@ InstanceInfo resolveInstance(const QString& basePath,
                              const QString& moduleName,
                              ResolveMode mode = ResolveMode::ReuseOrCreate,
                              const QString& explicitInstanceId = QString());
+
+/**
+ * @brief Resolve (or create) an instance directory for the given module (std::string overload).
+ *
+ * @param basePath           Root persistence directory (e.g. ~/.logoscore/data)
+ * @param moduleName         Name of the module (must be a simple name, no path separators or "..")
+ * @param mode               How to resolve the instance (see ResolveMode)
+ * @param explicitInstanceId Instance ID to use when mode is UseExplicit
+ * @return StdInstanceInfo with the resolved ID and full path.
+ *         Returns empty strings if inputs are invalid or directory creation fails.
+ */
+StdInstanceInfo resolveInstance(const std::string& basePath,
+                                const std::string& moduleName,
+                                ResolveMode mode = ResolveMode::ReuseOrCreate,
+                                const std::string& explicitInstanceId = std::string());
 
 }  // namespace InstancePersistence
 }  // namespace ModuleLib

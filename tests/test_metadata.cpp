@@ -2,6 +2,7 @@
 #include "module_metadata.h"
 #include "logos_module.h"
 #include <QJsonArray>
+#include <QString>
 #include <string>
 #include <vector>
 
@@ -267,4 +268,111 @@ TEST_F(RealPluginMetadataTest, GetModuleName_ReturnsCorrectName) {
 TEST_F(RealPluginMetadataTest, GetModuleDependencies_ReturnsEmptyForNoDeps) {
     std::vector<std::string> deps = LogosModule::getModuleDependencies(testPlugin);
     EXPECT_TRUE(deps.empty());
+}
+
+// =============================================================================
+// ModuleMetadata::fromPath(std::string) overload Tests
+// =============================================================================
+
+TEST(MetadataFromPathStdStringTest, NonExistentPath_ReturnsNullopt) {
+    auto result = ModuleMetadata::fromPath(std::string("/nonexistent/path/plugin.so"));
+    EXPECT_FALSE(result.has_value());
+}
+
+TEST(MetadataFromPathStdStringTest, EmptyPath_ReturnsNullopt) {
+    auto result = ModuleMetadata::fromPath(std::string(""));
+    EXPECT_FALSE(result.has_value());
+}
+
+TEST(MetadataFromPathStdStringTest, InvalidFile_ReturnsNullopt) {
+    auto result = ModuleMetadata::fromPath(std::string("/dev/null"));
+    EXPECT_FALSE(result.has_value());
+}
+
+// =============================================================================
+// LogosModule::loadFromPath(std::string, std::string*) overload Tests
+// =============================================================================
+
+TEST(LoadFromPathStdStringTest, NonExistentPath_ReturnsInvalidModule) {
+    std::string errorString;
+    LogosModule module = LogosModule::loadFromPath(
+        std::string("/nonexistent/path/plugin.so"), &errorString);
+
+    EXPECT_FALSE(module.isValid());
+    EXPECT_FALSE(errorString.empty());
+}
+
+TEST(LoadFromPathStdStringTest, NonExistentPath_NoErrorStringPtr_DoesNotCrash) {
+    LogosModule module = LogosModule::loadFromPath(
+        std::string("/nonexistent/path/plugin.so"));
+
+    EXPECT_FALSE(module.isValid());
+}
+
+TEST(LoadFromPathStdStringTest, EmptyPath_ReturnsInvalidModule) {
+    std::string errorString;
+    LogosModule module = LogosModule::loadFromPath(std::string(""), &errorString);
+
+    EXPECT_FALSE(module.isValid());
+    EXPECT_FALSE(errorString.empty());
+}
+
+TEST(LoadFromPathStdStringTest, InvalidFile_ReturnsInvalidModuleWithError) {
+    std::string errorString;
+    LogosModule module = LogosModule::loadFromPath(std::string("/dev/null"), &errorString);
+
+    EXPECT_FALSE(module.isValid());
+    EXPECT_FALSE(errorString.empty());
+}
+
+// =============================================================================
+// LogosModule::extractMetadata(std::string) overload Tests
+// =============================================================================
+
+TEST(ExtractMetadataStdStringTest, NonExistentPath_ReturnsNullopt) {
+    auto result = LogosModule::extractMetadata(std::string("/nonexistent/path/plugin.so"));
+    EXPECT_FALSE(result.has_value());
+}
+
+TEST(ExtractMetadataStdStringTest, EmptyPath_ReturnsNullopt) {
+    auto result = LogosModule::extractMetadata(std::string(""));
+    EXPECT_FALSE(result.has_value());
+}
+
+TEST(ExtractMetadataStdStringTest, InvalidFile_ReturnsNullopt) {
+    auto result = LogosModule::extractMetadata(std::string("/dev/null"));
+    EXPECT_FALSE(result.has_value());
+}
+
+// =============================================================================
+// Real plugin tests for std::string overloads
+// =============================================================================
+
+// Do not assert loadFromPath succeeds here: full dlopen can fail in headless CI
+// (missing deps, RPATH, no QCoreApplication) while metadata-only APIs still work.
+// Instead, verify the std::string overload matches the QString overload exactly.
+TEST_F(RealPluginMetadataTest, LoadFromPath_StdString_MatchesQStringOverload) {
+    QString qError;
+    std::string sError;
+    LogosModule viaQString = LogosModule::loadFromPath(QString::fromStdString(testPlugin), &qError);
+    LogosModule viaStdString = LogosModule::loadFromPath(testPlugin, &sError);
+
+    EXPECT_EQ(viaQString.isValid(), viaStdString.isValid());
+    EXPECT_EQ(qError.toStdString(), sError);
+}
+
+TEST_F(RealPluginMetadataTest, ExtractMetadata_StdString_ReturnsMetadata) {
+    auto result = LogosModule::extractMetadata(testPlugin);
+
+    ASSERT_TRUE(result.has_value());
+    EXPECT_TRUE(result->isValid());
+    EXPECT_EQ(result->name.toStdString(), "package_manager");
+}
+
+TEST_F(RealPluginMetadataTest, MetadataFromPath_StdString_ReturnsMetadata) {
+    auto result = ModuleMetadata::fromPath(testPlugin);
+
+    ASSERT_TRUE(result.has_value());
+    EXPECT_TRUE(result->isValid());
+    EXPECT_EQ(result->name.toStdString(), "package_manager");
 }

@@ -463,3 +463,44 @@ TEST(ProviderPluginIntrospectionTest, LegacyPlugin_StillWorks) {
     }
     EXPECT_TRUE(foundTestMethod);
 }
+
+// ---------------------------------------------------------------------------
+// hasMethod(std::string) instance-method overload tests
+// ---------------------------------------------------------------------------
+
+TEST(IntrospectionStdStringTest, HasMethod_StdString_ExistingMethod) {
+    MockPlugin plugin;
+    LogosModule module = LogosModule::wrapExisting(&plugin);
+
+    EXPECT_TRUE(module.hasMethod(std::string("testMethod")));
+    EXPECT_TRUE(module.hasMethod(std::string("noReturnMethod")));
+    EXPECT_TRUE(module.hasMethod(std::string("methodWithMultipleParams")));
+}
+
+TEST(IntrospectionStdStringTest, HasMethod_StdString_NonExistingMethod) {
+    MockPlugin plugin;
+    LogosModule module = LogosModule::wrapExisting(&plugin);
+
+    EXPECT_FALSE(module.hasMethod(std::string("nonExistentMethod")));
+    EXPECT_FALSE(module.hasMethod(std::string("")));
+}
+
+TEST(IntrospectionStdStringTest, HasMethod_StdString_MatchesQStringOverload) {
+    MockPlugin plugin;
+    LogosModule module = LogosModule::wrapExisting(&plugin);
+
+    // Both overloads must agree on the same answers
+    EXPECT_EQ(module.hasMethod(std::string("testMethod")),
+              module.hasMethod(QString("testMethod")));
+    EXPECT_EQ(module.hasMethod(std::string("nonExistent")),
+              module.hasMethod(QString("nonExistent")));
+}
+
+TEST(IntrospectionStdStringTest, HasMethod_StdString_ProviderPlugin) {
+    MockNewApiPlugin plugin;
+    LogosModule module = LogosModule::wrapExisting(&plugin);
+
+    EXPECT_TRUE(module.hasMethod(std::string("providerMethod")));
+    EXPECT_TRUE(module.hasMethod(std::string("noArgMethod")));
+    EXPECT_FALSE(module.hasMethod(std::string("nonExistent")));
+}
