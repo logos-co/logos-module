@@ -16,6 +16,10 @@ std::optional<ModuleMetadata> ModuleMetadata::fromPath(const QString& pluginPath
     return fromJson(metadata);
 }
 
+std::optional<ModuleMetadata> ModuleMetadata::fromPath(const std::string& pluginPath) {
+    return fromPath(QString::fromStdString(pluginPath));
+}
+
 std::optional<ModuleMetadata> ModuleMetadata::fromJson(const QJsonObject& json) {
     QJsonObject customMetadata = json.value("MetaData").toObject();
     if (customMetadata.isEmpty()) {

@@ -93,5 +93,18 @@ InstanceInfo resolveInstance(const QString& basePath,
     return {instanceId, persistencePath};
 }
 
+StdInstanceInfo resolveInstance(const std::string& basePath,
+                                const std::string& moduleName,
+                                ResolveMode mode,
+                                const std::string& explicitInstanceId)
+{
+    InstanceInfo info = resolveInstance(
+        QString::fromStdString(basePath),
+        QString::fromStdString(moduleName),
+        mode,
+        QString::fromStdString(explicitInstanceId));
+    return {info.instanceId.toStdString(), info.persistencePath.toStdString()};
+}
+
 }  // namespace InstancePersistence
 }  // namespace ModuleLib

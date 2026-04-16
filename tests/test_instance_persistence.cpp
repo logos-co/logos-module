@@ -117,7 +117,7 @@ TEST_F(InstancePersistenceTest, UseExplicit_FailsWithEmptyId) {
 // =============================================================================
 
 TEST_F(InstancePersistenceTest, EmptyBasePath_ReturnsEmpty) {
-    auto info = resolveInstance("", "my_module");
+    auto info = resolveInstance(QString(""), "my_module");
     EXPECT_TRUE(info.instanceId.isEmpty());
     EXPECT_TRUE(info.persistencePath.isEmpty());
 }
@@ -162,6 +162,88 @@ TEST_F(InstancePersistenceTest, ExplicitIdWithSlash_ReturnsEmpty) {
                                 ResolveMode::UseExplicit, "foo/bar");
     EXPECT_TRUE(info.instanceId.isEmpty());
     EXPECT_TRUE(info.persistencePath.isEmpty());
+}
+
+// =============================================================================
+// std::string overload
+// =============================================================================
+
+class StdStringInstancePersistenceTest : public ::testing::Test {
+protected:
+    QTemporaryDir tmpDir;
+
+    void SetUp() override {
+        ASSERT_TRUE(tmpDir.isValid());
+    }
+
+    std::string basePath() const { return tmpDir.path().toStdString(); }
+};
+
+TEST_F(StdStringInstancePersistenceTest, StdString_ReuseOrCreate_CreatesNewInstance) {
+    auto info = resolveInstance(basePath(), "my_module");
+
+    EXPECT_FALSE(info.instanceId.empty());
+    EXPECT_EQ(info.instanceId.size(), 12u);
+    EXPECT_TRUE(QDir(QString::fromStdString(info.persistencePath)).exists());
+    EXPECT_EQ(info.persistencePath,
+              basePath() + "/my_module/" + info.instanceId);
+}
+
+TEST_F(StdStringInstancePersistenceTest, StdString_ReuseOrCreate_ReusesExistingInstance) {
+    auto first = resolveInstance(basePath(), "my_module");
+    ASSERT_FALSE(first.instanceId.empty());
+
+    auto second = resolveInstance(basePath(), "my_module");
+    EXPECT_EQ(first.instanceId, second.instanceId);
+    EXPECT_EQ(first.persistencePath, second.persistencePath);
+}
+
+TEST_F(StdStringInstancePersistenceTest, StdString_AlwaysCreate_GeneratesNewIdEachTime) {
+    auto first = resolveInstance(basePath(), "my_module", ResolveMode::AlwaysCreate);
+    auto second = resolveInstance(basePath(), "my_module", ResolveMode::AlwaysCreate);
+
+    EXPECT_FALSE(first.instanceId.empty());
+    EXPECT_FALSE(second.instanceId.empty());
+    EXPECT_NE(first.instanceId, second.instanceId);
+}
+
+TEST_F(StdStringInstancePersistenceTest, StdString_UseExplicit_UsesProvidedId) {
+    auto info = resolveInstance(basePath(), "my_module",
+                                ResolveMode::UseExplicit, "custom_id_123");
+
+    EXPECT_EQ(info.instanceId, "custom_id_123");
+    EXPECT_EQ(info.persistencePath,
+              basePath() + "/my_module/custom_id_123");
+    EXPECT_TRUE(QDir(QString::fromStdString(info.persistencePath)).exists());
+}
+
+TEST_F(StdStringInstancePersistenceTest, StdString_EmptyBasePath_ReturnsEmpty) {
+    auto info = resolveInstance(std::string(""), "my_module");
+    EXPECT_TRUE(info.instanceId.empty());
+    EXPECT_TRUE(info.persistencePath.empty());
+}
+
+TEST_F(StdStringInstancePersistenceTest, StdString_EmptyModuleName_ReturnsEmpty) {
+    auto info = resolveInstance(basePath(), std::string(""));
+    EXPECT_TRUE(info.instanceId.empty());
+    EXPECT_TRUE(info.persistencePath.empty());
+}
+
+TEST_F(StdStringInstancePersistenceTest, StdString_PathTraversal_ReturnsEmpty) {
+    auto info = resolveInstance(basePath(), "../escape");
+    EXPECT_TRUE(info.instanceId.empty());
+    EXPECT_TRUE(info.persistencePath.empty());
+}
+
+TEST_F(StdStringInstancePersistenceTest, StdString_ResultMatchesQStringOverload) {
+    auto stdInfo = resolveInstance(basePath(), "my_module",
+                                   ResolveMode::UseExplicit, "test_id");
+    auto qtInfo = resolveInstance(QString::fromStdString(basePath()),
+                                  "my_module",
+                                  ResolveMode::UseExplicit, "test_id");
+
+    EXPECT_EQ(stdInfo.instanceId, qtInfo.instanceId.toStdString());
+    EXPECT_EQ(stdInfo.persistencePath, qtInfo.persistencePath.toStdString());
 }
 
 // =============================================================================

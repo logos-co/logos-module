@@ -157,6 +157,23 @@ std::vector<std::string> LogosModule::getModuleDependencies(const std::string& p
     return result;
 }
 
+LogosModule LogosModule::loadFromPath(const std::string& pluginPath, std::string* errorString) {
+    QString qError;
+    LogosModule module = loadFromPath(QString::fromStdString(pluginPath), &qError);
+    if (errorString) {
+        *errorString = qError.toStdString();
+    }
+    return module;
+}
+
+std::optional<ModuleMetadata> LogosModule::extractMetadata(const std::string& pluginPath) {
+    return extractMetadata(QString::fromStdString(pluginPath));
+}
+
+bool LogosModule::hasMethod(const std::string& methodName) const {
+    return hasMethod(QString::fromStdString(methodName));
+}
+
 bool LogosModule::isValid() const {
     return m_instance != nullptr;
 }
