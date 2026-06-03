@@ -18,7 +18,10 @@ QJsonObject MethodInfo::toJson() const {
     obj["signature"] = signature;
     obj["returnType"] = returnType;
     obj["isInvokable"] = isInvokable;
-    
+    if (!description.isEmpty()) {
+        obj["description"] = description;
+    }
+
     if (!parameters.empty()) {
         QJsonArray paramsArray;
         for (const auto& param : parameters) {
@@ -246,6 +249,7 @@ std::vector<MethodInfo> LogosModule::getMethods(QObject* obj, bool excludeBaseCl
                 info.signature = mo["signature"].toString();
                 info.returnType = mo["returnType"].toString();
                 info.isInvokable = mo["isInvokable"].toBool(true);
+                info.description = mo["description"].toString();
                 QJsonArray params = mo["parameters"].toArray();
                 for (const QJsonValue& pv : params) {
                     QJsonObject po = pv.toObject();

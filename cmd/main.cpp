@@ -160,7 +160,11 @@ void printMethodsHuman(const std::vector<MethodInfo>& methods) {
         
         out << ")\n";
         out << "  Signature: " << method.signature << "\n";
-        out << "  Invokable: " << (method.isInvokable ? "yes" : "no") << "\n\n";
+        out << "  Invokable: " << (method.isInvokable ? "yes" : "no") << "\n";
+        if (!method.description.isEmpty()) {
+            out << "  Description: " << method.description << "\n";
+        }
+        out << "\n";
     }
 }
 
