@@ -33,8 +33,9 @@ struct MethodInfo {
     QString signature;
     QString returnType;
     bool isInvokable = false;
+    QString description;
     std::vector<ParameterInfo> parameters;
-    
+
     QJsonObject toJson() const;
 };
 

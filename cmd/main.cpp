@@ -3,6 +3,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QStringList>
 #include <QFileInfo>
 #include <iostream>
 #include <vector>
@@ -160,7 +161,19 @@ void printMethodsHuman(const std::vector<MethodInfo>& methods) {
         
         out << ")\n";
         out << "  Signature: " << method.signature << "\n";
-        out << "  Invokable: " << (method.isInvokable ? "yes" : "no") << "\n\n";
+        out << "  Invokable: " << (method.isInvokable ? "yes" : "no") << "\n";
+        if (!method.description.isEmpty()) {
+            const QStringList descLines = method.description.split('\n');
+            if (descLines.size() <= 1) {
+                out << "  Description: " << method.description << "\n";
+            } else {
+                out << "  Description:\n";
+                for (const QString& dl : descLines) {
+                    out << "    " << dl << "\n";
+                }
+            }
+        }
+        out << "\n";
     }
 }
 
