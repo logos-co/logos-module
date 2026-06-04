@@ -37,10 +37,13 @@ class MockProviderObject : public LogosProviderObject {
 public:
     QVariant callMethod(const QString&, const QVariantList&) override { return {}; }
     bool informModuleToken(const QString&, const QString&) override { return true; }
+    // getMethods() returns the full interface: methods (type "method") followed
+    // by events (type "event"). lm splits them back out by "type".
     QJsonArray getMethods() override {
-        QJsonArray methods;
+        QJsonArray interface;
         {
             QJsonObject m;
+            m["type"] = "method";
             m["name"] = "providerMethod";
             m["signature"] = "providerMethod(QString)";
             m["returnType"] = "QString";
@@ -48,18 +51,20 @@ public:
             QJsonArray params;
             params.append(QJsonObject{{"type", "QString"}, {"name", "input"}});
             m["parameters"] = params;
-            methods.append(m);
+            interface.append(m);
         }
         {
             QJsonObject m;
+            m["type"] = "method";
             m["name"] = "noArgMethod";
             m["signature"] = "noArgMethod()";
             m["returnType"] = "bool";
             m["isInvokable"] = true;
-            methods.append(m);
+            interface.append(m);
         }
         {
             QJsonObject m;
+            m["type"] = "method";
             m["name"] = "multiParam";
             m["signature"] = "multiParam(QString,int,bool)";
             m["returnType"] = "void";
@@ -69,14 +74,11 @@ public:
             params.append(QJsonObject{{"type", "int"}, {"name", "count"}});
             params.append(QJsonObject{{"type", "bool"}, {"name", "flag"}});
             m["parameters"] = params;
-            methods.append(m);
+            interface.append(m);
         }
-        return methods;
-    }
-    QJsonArray getEvents() override {
-        QJsonArray events;
         {
             QJsonObject e;
+            e["type"] = "event";
             e["name"] = "providerEvent";
             e["signature"] = "providerEvent(QString)";
             // Documented event — carries a (multi-line) description, and
@@ -85,16 +87,17 @@ public:
             QJsonArray params;
             params.append(QJsonObject{{"type", "QString"}, {"name", "payload"}});
             e["parameters"] = params;
-            events.append(e);
+            interface.append(e);
         }
         {
             QJsonObject e;
+            e["type"] = "event";
             e["name"] = "tickEvent";
             e["signature"] = "tickEvent()";
             // Undocumented event — no description field.
-            events.append(e);
+            interface.append(e);
         }
-        return events;
+        return interface;
     }
     void setEventListener(EventCallback) override {}
     void init(void*) override {}

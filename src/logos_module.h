@@ -219,8 +219,9 @@ public:
     /**
      * @brief Get all events declared by this plugin as a QJsonArray.
      *
-     * Events come from the new-API provider's getEvents(). Legacy Qt plugins
-     * (no provider) report no events.
+     * Events ride inside the new-API provider's getMethods() (tagged
+     * type "event"); this returns just those entries. Legacy Qt plugins (no
+     * provider) report no events.
      *
      * @return QJsonArray Array of event information objects
      */
