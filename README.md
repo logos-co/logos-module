@@ -32,7 +32,7 @@ nix build .#all
 
 ## Using the `lm` Binary
 
-Show both metadata and methods (default):
+Show metadata, methods, and events (default):
 ```bash
 lm /path/to/plugin.dylib
 lm /path/to/plugin.dylib --json
@@ -50,6 +50,19 @@ Show plugin methods only:
 lm methods /path/to/plugin.dylib
 lm methods /path/to/plugin.dylib --json
 ```
+
+Show plugin events only:
+```bash
+lm events /path/to/plugin.dylib
+lm events /path/to/plugin.dylib --json
+```
+
+`methods` and `events` each list the corresponding half of the module's API.
+When a method or event is documented with a `///` (or `/** … */`) doc comment in
+the module's header, `lm` prints that `description` beneath the signature (and
+includes it in `--json`). Events are listed without a return type — they are
+fire-and-forget — and only universal modules declare them; legacy modules report
+none.
 
 Help:
 ```bash

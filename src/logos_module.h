@@ -215,7 +215,17 @@ public:
      * @return QJsonArray Array of method information objects
      */
     QJsonArray getMethodsAsJson(bool excludeBaseClass = true) const;
-    
+
+    /**
+     * @brief Get all events declared by this plugin as a QJsonArray.
+     *
+     * Events come from the new-API provider's getEvents(). Legacy Qt plugins
+     * (no provider) report no events.
+     *
+     * @return QJsonArray Array of event information objects
+     */
+    QJsonArray getEventsAsJson() const;
+
     /**
      * @brief Get the class name of the plugin's meta-object.
      * 
@@ -256,7 +266,15 @@ public:
      * @return QJsonArray Array of method information objects
      */
     static QJsonArray getMethodsAsJson(QObject* obj, bool excludeBaseClass = true);
-    
+
+    /**
+     * @brief Get all events declared by an arbitrary QObject as a QJsonArray.
+     *
+     * @param obj The QObject to introspect (new-API LogosProviderPlugin)
+     * @return QJsonArray Array of event information objects (empty for legacy)
+     */
+    static QJsonArray getEventsAsJson(QObject* obj);
+
     /**
      * @brief Get the class name of an arbitrary QObject.
      * 

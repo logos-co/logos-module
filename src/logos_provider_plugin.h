@@ -19,6 +19,10 @@ public:
     virtual QVariant callMethod(const QString& methodName, const QVariantList& args) = 0;
     virtual bool informModuleToken(const QString& moduleName, const QString& token) = 0;
     virtual QJsonArray getMethods() = 0;
+    // NOTE: getEvents() must stay here (right after getMethods, before
+    // setEventListener) to match the vtable slot in cpp-sdk's
+    // LogosProviderObject — lm dispatches getEvents() through this layout.
+    virtual QJsonArray getEvents() = 0;
     virtual void setEventListener(EventCallback callback) = 0;
     virtual void init(void* apiInstance) = 0;
     virtual QString providerName() const = 0;

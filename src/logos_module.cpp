@@ -220,6 +220,10 @@ QJsonArray LogosModule::getMethodsAsJson(bool excludeBaseClass) const {
     return getMethodsAsJson(m_instance, excludeBaseClass);
 }
 
+QJsonArray LogosModule::getEventsAsJson() const {
+    return getEventsAsJson(m_instance);
+}
+
 QString LogosModule::getClassName() const {
     return getClassName(m_instance);
 }
@@ -326,6 +330,21 @@ QJsonArray LogosModule::getMethodsAsJson(QObject* obj, bool excludeBaseClass) {
     }
 
     return methodsArray;
+}
+
+QJsonArray LogosModule::getEventsAsJson(QObject* obj) {
+    // Events come from the new-API provider's getEvents(). Legacy Qt plugins
+    // have no declared events.
+    LogosProviderPlugin* providerPlugin = qobject_cast<LogosProviderPlugin*>(obj);
+    if (providerPlugin) {
+        LogosProviderObject* provider = providerPlugin->createProviderObject();
+        if (provider) {
+            QJsonArray result = provider->getEvents();
+            delete provider;
+            return result;
+        }
+    }
+    return QJsonArray();
 }
 
 QString LogosModule::getClassName(QObject* obj) {
