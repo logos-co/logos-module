@@ -65,9 +65,10 @@ void printUsage() {
         << "Usage: lm [command] [options] <plugin-path>\n"
         << "\n"
         << "Commands:\n"
-        << "  (default)   Show both metadata and methods (when no command specified)\n"
+        << "  (default)   Show metadata, methods, and events (when no command specified)\n"
         << "  metadata    Show plugin metadata (name, version, description, etc.)\n"
         << "  methods     Show plugin methods and signatures\n"
+        << "  events      Show plugin events and signatures\n"
         << "\n"
         << "Options:\n"
         << "  --json      Output in JSON format\n"
@@ -99,6 +100,15 @@ void printCommandHelp(const QString& command) {
             << "\n"
             << "Show all methods exposed by the plugin via Qt's meta-object system.\n"
             << "Displays method name, signature, return type, and parameters.\n"
+            << "\n"
+            << "Options:\n"
+            << "  --json   Output in JSON format\n"
+            << "  --debug  Show debug output from plugin loading\n";
+    } else if (command == "events") {
+        out << "Usage: lm events [options] <plugin-path>\n"
+            << "\n"
+            << "Show all events the plugin can emit (its `logos_events:` section).\n"
+            << "Displays event name, signature, parameters, and description.\n"
             << "\n"
             << "Options:\n"
             << "  --json   Output in JSON format\n"
@@ -183,6 +193,53 @@ void printMethodsJson(QObject* plugin) {
     out << doc.toJson(QJsonDocument::Indented);
 }
 
+void printEventsHuman(const QJsonArray& events) {
+    out << "Plugin Events:\n"
+        << "==============\n\n";
+
+    if (events.isEmpty()) {
+        out << "(no events found)\n";
+        return;
+    }
+
+    for (const QJsonValue& ev : events) {
+        const QJsonObject obj = ev.toObject();
+        // Events are void/fire-and-forget — render like a void signal.
+        out << "void " << obj["name"].toString() << "(";
+
+        const QJsonArray params = obj["parameters"].toArray();
+        bool first = true;
+        for (const QJsonValue& pv : params) {
+            const QJsonObject po = pv.toObject();
+            if (!first) out << ", ";
+            out << po["type"].toString() << " " << po["name"].toString();
+            first = false;
+        }
+
+        out << ")\n";
+        out << "  Signature: " << obj["signature"].toString() << "\n";
+        const QString desc = obj["description"].toString();
+        if (!desc.isEmpty()) {
+            const QStringList descLines = desc.split('\n');
+            if (descLines.size() <= 1) {
+                out << "  Description: " << desc << "\n";
+            } else {
+                out << "  Description:\n";
+                for (const QString& dl : descLines) {
+                    out << "    " << dl << "\n";
+                }
+            }
+        }
+        out << "\n";
+    }
+}
+
+void printEventsJson(QObject* plugin) {
+    QJsonArray eventsArray = LogosModule::getEventsAsJson(plugin);
+    QJsonDocument doc(eventsArray);
+    out << doc.toJson(QJsonDocument::Indented);
+}
+
 int cmdMetadata(const QString& pluginPath, bool jsonOutput) {
     QFileInfo fileInfo(pluginPath);
     QString absolutePath = fileInfo.absoluteFilePath();
@@ -264,7 +321,53 @@ int cmdMethods(const QString& pluginPath, bool jsonOutput, bool debugOutput) {
         auto methods = plugin.getMethods();
         printMethodsHuman(methods);
     }
-    
+
+    return 0;
+}
+
+int cmdEvents(const QString& pluginPath, bool jsonOutput, bool debugOutput) {
+    QFileInfo fileInfo(pluginPath);
+    QString absolutePath = fileInfo.absoluteFilePath();
+
+    if (!fileInfo.exists()) {
+        err << "Error: Plugin file not found: " << pluginPath << Qt::endl;
+        return 1;
+    }
+
+    QString errorString;
+    LogosModule plugin;
+
+    if (!debugOutput) {
+        int stdout_copy = dup(STDOUT_FILENO);
+        int stderr_copy = dup(STDERR_FILENO);
+        int devnull = open("/dev/null", O_WRONLY);
+        if (devnull != -1) {
+            dup2(devnull, STDOUT_FILENO);
+            dup2(devnull, STDERR_FILENO);
+            close(devnull);
+        }
+        plugin = LogosModule::loadFromPath(absolutePath, &errorString);
+        if (stdout_copy != -1) { dup2(stdout_copy, STDOUT_FILENO); close(stdout_copy); }
+        if (stderr_copy != -1) { dup2(stderr_copy, STDERR_FILENO); close(stderr_copy); }
+    } else {
+        plugin = LogosModule::loadFromPath(absolutePath, &errorString);
+    }
+
+    if (!plugin.isValid()) {
+        err << "Error: Failed to load plugin: " << errorString << Qt::endl;
+        return 1;
+    }
+    if (!plugin.instance()) {
+        err << "Error: Plugin loaded but instance is null" << Qt::endl;
+        return 1;
+    }
+
+    if (jsonOutput) {
+        printEventsJson(plugin.instance());
+    } else {
+        printEventsHuman(plugin.getEventsAsJson());
+    }
+
     return 0;
 }
 
@@ -338,21 +441,27 @@ int cmdInfo(const QString& pluginPath, bool jsonOutput, bool debugOutput) {
         
         combined["metadata"] = metadataObj;
         combined["methods"] = LogosModule::getMethodsAsJson(plugin.instance());
-        
+        combined["events"] = LogosModule::getEventsAsJson(plugin.instance());
+
         QJsonDocument doc(combined);
         out << doc.toJson(QJsonDocument::Indented);
     } else {
-        // For human-readable output, print metadata then methods with a separator
+        // For human-readable output, print metadata, then methods, then events.
         int result = cmdMetadata(pluginPath, false);
         if (result != 0) {
             return result;
         }
-        
+
         out << "\n";
-        
-        return cmdMethods(pluginPath, false, debugOutput);
+        result = cmdMethods(pluginPath, false, debugOutput);
+        if (result != 0) {
+            return result;
+        }
+
+        out << "\n";
+        return cmdEvents(pluginPath, false, debugOutput);
     }
-    
+
     return 0;
 }
 
@@ -391,7 +500,7 @@ int main(int argc, char* argv[]) {
     QString pluginPath;
     
     // Check if first arg is a command or a plugin path
-    if (firstArg == "metadata" || firstArg == "methods") {
+    if (firstArg == "metadata" || firstArg == "methods" || firstArg == "events") {
         command = firstArg;
     } else if (firstArg[0] != '-') {
         // First arg is not a command and not an option, treat as plugin path
@@ -450,7 +559,9 @@ int main(int argc, char* argv[]) {
         return cmdMetadata(pluginPath, jsonOutput);
     } else if (command == "methods") {
         return cmdMethods(pluginPath, jsonOutput, debugOutput);
+    } else if (command == "events") {
+        return cmdEvents(pluginPath, jsonOutput, debugOutput);
     }
-    
+
     return 0;
 }

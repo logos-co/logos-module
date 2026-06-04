@@ -18,6 +18,12 @@ public:
 
     virtual QVariant callMethod(const QString& methodName, const QVariantList& args) = 0;
     virtual bool informModuleToken(const QString& moduleName, const QString& token) = 0;
+    // getMethods() returns the module's full interface — methods AND events,
+    // each tagged with a "type" ("method"/"event"). lm splits them by type
+    // (see getMethodsAsJson / getEventsAsJson). There is deliberately NO
+    // getEvents() vtable slot here: keeping this mirror's layout identical to
+    // older cpp-sdk releases is what lets lm introspect both old and new
+    // modules without a vtable mismatch.
     virtual QJsonArray getMethods() = 0;
     virtual void setEventListener(EventCallback callback) = 0;
     virtual void init(void* apiInstance) = 0;

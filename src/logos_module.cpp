@@ -220,6 +220,10 @@ QJsonArray LogosModule::getMethodsAsJson(bool excludeBaseClass) const {
     return getMethodsAsJson(m_instance, excludeBaseClass);
 }
 
+QJsonArray LogosModule::getEventsAsJson() const {
+    return getEventsAsJson(m_instance);
+}
+
 QString LogosModule::getClassName() const {
     return getClassName(m_instance);
 }
@@ -244,6 +248,10 @@ std::vector<MethodInfo> LogosModule::getMethods(QObject* obj, bool excludeBaseCl
             QJsonArray jsonMethods = provider->getMethods();
             for (const QJsonValue& v : jsonMethods) {
                 QJsonObject mo = v.toObject();
+                // getMethods() carries the full interface (methods + events);
+                // this MethodInfo path is methods-only, so skip event entries.
+                if (mo.value(QStringLiteral("type")).toString() == QStringLiteral("event"))
+                    continue;
                 MethodInfo info;
                 info.name = mo["name"].toString();
                 info.signature = mo["signature"].toString();
@@ -306,13 +314,31 @@ std::vector<MethodInfo> LogosModule::getMethods(QObject* obj, bool excludeBaseCl
     return methods;
 }
 
+namespace {
+// A provider's getMethods() returns the module's full interface — methods AND
+// events, each tagged with a "type" ("method"/"event"). Split it by type. An
+// entry with no "type" is treated as a method, so plugins built against the
+// pre-events SDK (whose getMethods() carries no events) degrade cleanly.
+QJsonArray filterInterfaceByType(const QJsonArray& interface, bool keepEvents) {
+    QJsonArray out;
+    for (const QJsonValue& v : interface) {
+        const bool isEvent =
+            v.toObject().value(QStringLiteral("type")).toString() == QStringLiteral("event");
+        if (isEvent == keepEvents) out.append(v);
+    }
+    return out;
+}
+} // namespace
+
 QJsonArray LogosModule::getMethodsAsJson(QObject* obj, bool excludeBaseClass) {
-    // New-API: detect LogosProviderPlugin and use getMethods() directly
+    // New-API: getMethods() returns the full interface (methods + events);
+    // keep only the methods here.
     LogosProviderPlugin* providerPlugin = qobject_cast<LogosProviderPlugin*>(obj);
     if (providerPlugin) {
         LogosProviderObject* provider = providerPlugin->createProviderObject();
         if (provider) {
-            QJsonArray result = provider->getMethods();
+            QJsonArray result =
+                filterInterfaceByType(provider->getMethods(), /*keepEvents=*/false);
             delete provider;
             return result;
         }
@@ -326,6 +352,23 @@ QJsonArray LogosModule::getMethodsAsJson(QObject* obj, bool excludeBaseClass) {
     }
 
     return methodsArray;
+}
+
+QJsonArray LogosModule::getEventsAsJson(QObject* obj) {
+    // Events ride inside the new-API provider's getMethods() (tagged type
+    // "event") — there is no separate getEvents() vtable method. Legacy Qt
+    // plugins have no declared events.
+    LogosProviderPlugin* providerPlugin = qobject_cast<LogosProviderPlugin*>(obj);
+    if (providerPlugin) {
+        LogosProviderObject* provider = providerPlugin->createProviderObject();
+        if (provider) {
+            QJsonArray result =
+                filterInterfaceByType(provider->getMethods(), /*keepEvents=*/true);
+            delete provider;
+            return result;
+        }
+    }
+    return QJsonArray();
 }
 
 QString LogosModule::getClassName(QObject* obj) {
