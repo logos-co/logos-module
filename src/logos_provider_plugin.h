@@ -22,7 +22,10 @@ public:
     // NOTE: getEvents() must stay here (right after getMethods, before
     // setEventListener) to match the vtable slot in cpp-sdk's
     // LogosProviderObject — lm dispatches getEvents() through this layout.
-    virtual QJsonArray getEvents() = 0;
+    // Non-pure with a default (matching cpp-sdk) so existing implementors
+    // (e.g. the unit tests' MockProviderObject) keep compiling without an
+    // override; providers built against the events-aware SDK override it.
+    virtual QJsonArray getEvents() { return QJsonArray(); }
     virtual void setEventListener(EventCallback callback) = 0;
     virtual void init(void* apiInstance) = 0;
     virtual QString providerName() const = 0;

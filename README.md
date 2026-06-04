@@ -60,9 +60,9 @@ lm events /path/to/plugin.dylib --json
 `methods` and `events` each list the corresponding half of the module's API.
 When a method or event is documented with a `///` (or `/** … */`) doc comment in
 the module's header, `lm` prints that `description` beneath the signature (and
-includes it in `--json`). Events are listed without a return type — they are
-fire-and-forget — and only universal modules declare them; legacy modules report
-none.
+includes it in `--json`). Events render with a `void` return (e.g.
+`void versionReady(QString version)`) since they are fire-and-forget, and only
+universal modules declare them; legacy modules report none.
 
 Help:
 ```bash

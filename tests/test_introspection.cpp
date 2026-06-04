@@ -73,6 +73,29 @@ public:
         }
         return methods;
     }
+    QJsonArray getEvents() override {
+        QJsonArray events;
+        {
+            QJsonObject e;
+            e["name"] = "providerEvent";
+            e["signature"] = "providerEvent(QString)";
+            // Documented event — carries a (multi-line) description, and
+            // deliberately no returnType/isInvokable (events are void).
+            e["description"] = "Fired by the provider.\nCarries a payload string.";
+            QJsonArray params;
+            params.append(QJsonObject{{"type", "QString"}, {"name", "payload"}});
+            e["parameters"] = params;
+            events.append(e);
+        }
+        {
+            QJsonObject e;
+            e["name"] = "tickEvent";
+            e["signature"] = "tickEvent()";
+            // Undocumented event — no description field.
+            events.append(e);
+        }
+        return events;
+    }
     void setEventListener(EventCallback) override {}
     void init(void*) override {}
     QString providerName() const override { return "mock_provider"; }
@@ -243,6 +266,59 @@ TEST(IntrospectionTest, GetMethodsAsJson_ParametersIncluded) {
     }
     
     EXPECT_TRUE(foundMethodWithParams);
+}
+
+// ---------------------------------------------------------------------------
+// Event introspection (new-API providers)
+// ---------------------------------------------------------------------------
+
+TEST(IntrospectionTest, GetEventsAsJson_NewApiProvider_ReturnsEvents) {
+    MockNewApiPlugin plugin;
+
+    QJsonArray eventsJson = LogosModule::getEventsAsJson(&plugin);
+
+    EXPECT_EQ(eventsJson.size(), 2);
+
+    bool foundDocumented = false;
+    bool foundUndocumented = false;
+    for (const QJsonValue& value : eventsJson) {
+        QJsonObject eventObj = value.toObject();
+        // Events never carry returnType/isInvokable (they are void).
+        EXPECT_FALSE(eventObj.contains("returnType"));
+        EXPECT_FALSE(eventObj.contains("isInvokable"));
+
+        if (eventObj["name"].toString() == "providerEvent") {
+            foundDocumented = true;
+            EXPECT_EQ(eventObj["signature"].toString().toStdString(),
+                      "providerEvent(QString)");
+            // Multi-line description preserved verbatim (joined with \n).
+            EXPECT_EQ(eventObj["description"].toString().toStdString(),
+                      "Fired by the provider.\nCarries a payload string.");
+            EXPECT_EQ(eventObj["parameters"].toArray().size(), 1);
+        } else if (eventObj["name"].toString() == "tickEvent") {
+            foundUndocumented = true;
+            // Undocumented event: no description field at all.
+            EXPECT_FALSE(eventObj.contains("description"));
+        }
+    }
+    EXPECT_TRUE(foundDocumented);
+    EXPECT_TRUE(foundUndocumented);
+}
+
+TEST(IntrospectionTest, GetEventsAsJson_LegacyPlugin_Empty) {
+    // A legacy Q_INVOKABLE plugin is not a provider, so it has no declared
+    // events — the events array is empty (events are a new-API concept).
+    MockPlugin plugin;
+
+    QJsonArray eventsJson = LogosModule::getEventsAsJson(&plugin);
+
+    EXPECT_TRUE(eventsJson.isEmpty());
+}
+
+TEST(IntrospectionTest, GetEventsAsJson_NullPlugin) {
+    QJsonArray eventsJson = LogosModule::getEventsAsJson(nullptr);
+
+    EXPECT_TRUE(eventsJson.isEmpty());
 }
 
 TEST(IntrospectionTest, GetClassName_ReturnsCorrectName) {
