@@ -124,7 +124,18 @@ void printMetadataHuman(const ModuleMetadata& metadata) {
         << "Description:  " << metadata.description << "\n"
         << "Author:       " << metadata.author << "\n"
         << "Type:         " << metadata.type << "\n";
-    
+
+    // The logos-protocol semver this module was compiled against — the one
+    // number governing load/call compatibility (same MAJOR <=> compatible).
+    // Modules from pre-protocol builders have no stamp.
+    const QString protocolVersion = metadata.rawMetadata
+        .value(QStringLiteral("logos_protocol_version")).toString();
+    out << "Protocol:     "
+        << (protocolVersion.isEmpty()
+                ? QStringLiteral("(unstamped — pre-protocol build)")
+                : protocolVersion)
+        << "\n";
+
     if (!metadata.dependencies.isEmpty()) {
         out << "Dependencies: " << metadata.dependencies.join(", ") << "\n";
     } else {
@@ -139,7 +150,13 @@ void printMetadataJson(const ModuleMetadata& metadata) {
     obj["description"] = metadata.description;
     obj["author"] = metadata.author;
     obj["type"] = metadata.type;
-    
+    {
+        const QString protocolVersion = metadata.rawMetadata
+            .value(QStringLiteral("logos_protocol_version")).toString();
+        if (!protocolVersion.isEmpty())
+            obj["logos_protocol_version"] = protocolVersion;
+    }
+
     QJsonArray deps;
     for (const QString& dep : metadata.dependencies) {
         deps.append(dep);
