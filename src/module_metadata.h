@@ -25,7 +25,11 @@ struct ModuleMetadata {
     
     // Raw JSON metadata for any additional fields
     QJsonObject rawMetadata;
-    
+
+    // The same raw metadata as a compact JSON string, so Qt-free consumers
+    // (liblogos core's protocol gate) can parse it without QJson.
+    std::string rawMetadataJson;
+
     /**
      * @brief Check if the metadata is valid (has at least a name)
      */

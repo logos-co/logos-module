@@ -1,6 +1,7 @@
 #include "module_metadata.h"
 #include <QPluginLoader>
 #include <QJsonArray>
+#include <QJsonDocument>
 
 namespace ModuleLib {
 
@@ -44,6 +45,9 @@ ModuleMetadata ModuleMetadata::fromCustomMetadata(const QJsonObject& customMetad
     result.author = customMetadata.value("author").toString();
     result.type = customMetadata.value("type").toString();
     result.rawMetadata = customMetadata;
+    result.rawMetadataJson = QJsonDocument(customMetadata)
+                                 .toJson(QJsonDocument::Compact)
+                                 .toStdString();
     
     QJsonArray depsArray = customMetadata.value("dependencies").toArray();
     for (const QJsonValue& dep : depsArray) {
