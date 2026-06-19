@@ -90,6 +90,28 @@ TEST(MetadataTest, FromCustomMetadata_EmptyDependencies) {
     EXPECT_TRUE(metadata.dependencies.isEmpty());
 }
 
+TEST(MetadataTest, FromCustomMetadata_WithDisplayName) {
+    QJsonObject json;
+    json["name"] = "snake_module";
+    json["display_name"] = "Friendly Label";
+
+    auto metadata = ModuleMetadata::fromCustomMetadata(json);
+
+    EXPECT_TRUE(metadata.isValid());
+    EXPECT_EQ(metadata.displayName.toStdString(), "Friendly Label");
+}
+
+TEST(MetadataTest, FromCustomMetadata_MissingDisplayName_IsEmpty) {
+    QJsonObject json;
+    json["name"] = "snake_module";
+    // display_name intentionally omitted — consumers fall back to name.
+
+    auto metadata = ModuleMetadata::fromCustomMetadata(json);
+
+    EXPECT_TRUE(metadata.isValid());
+    EXPECT_TRUE(metadata.displayName.isEmpty());
+}
+
 TEST(MetadataTest, FromCustomMetadata_RawMetadataPreserved) {
     QJsonObject json;
     json["name"] = "test_plugin";
