@@ -40,6 +40,7 @@ ModuleMetadata ModuleMetadata::fromCustomMetadata(const QJsonObject& customMetad
     ModuleMetadata result;
     
     result.name = customMetadata.value("name").toString();
+    result.displayName = customMetadata.value("display_name").toString();
     result.version = customMetadata.value("version").toString();
     result.description = customMetadata.value("description").toString();
     result.author = customMetadata.value("author").toString();

@@ -120,6 +120,11 @@ void printMetadataHuman(const ModuleMetadata& metadata) {
     out << "Plugin Metadata:\n"
         << "================\n"
         << "Name:         " << metadata.name << "\n"
+        << "Display name: "
+        << (metadata.displayName.isEmpty()
+                ? QStringLiteral("(unset — falls back to name)")
+                : metadata.displayName)
+        << "\n"
         << "Version:      " << metadata.version << "\n"
         << "Description:  " << metadata.description << "\n"
         << "Author:       " << metadata.author << "\n"
@@ -146,6 +151,8 @@ void printMetadataHuman(const ModuleMetadata& metadata) {
 void printMetadataJson(const ModuleMetadata& metadata) {
     QJsonObject obj;
     obj["name"] = metadata.name;
+    if (!metadata.displayName.isEmpty())
+        obj["display_name"] = metadata.displayName;
     obj["version"] = metadata.version;
     obj["description"] = metadata.description;
     obj["author"] = metadata.author;
@@ -445,6 +452,8 @@ int cmdInfo(const QString& pluginPath, bool jsonOutput, bool debugOutput) {
         
         QJsonObject metadataObj;
         metadataObj["name"] = metadata->name;
+        if (!metadata->displayName.isEmpty())
+            metadataObj["display_name"] = metadata->displayName;
         metadataObj["version"] = metadata->version;
         metadataObj["description"] = metadata->description;
         metadataObj["author"] = metadata->author;
