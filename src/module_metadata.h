@@ -17,6 +17,7 @@ namespace ModuleLib {
  */
 struct ModuleMetadata {
     QString name;
+    QString displayName;
     QString version;
     QString description;
     QString author;
