@@ -148,6 +148,14 @@ std::string LogosModule::getModuleName(const std::string& pluginPath) {
     return metadata->name.toStdString();
 }
 
+std::string LogosModule::getRawMetadataJson(const std::string& pluginPath) {
+    auto metadata = extractMetadata(QString::fromStdString(pluginPath));
+    if (!metadata || !metadata->isValid()) {
+        return {};
+    }
+    return metadata->rawMetadataJson;
+}
+
 std::vector<std::string> LogosModule::getModuleDependencies(const std::string& pluginPath) {
     auto metadata = extractMetadata(QString::fromStdString(pluginPath));
     if (!metadata) {
