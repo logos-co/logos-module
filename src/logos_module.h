@@ -140,7 +140,22 @@ public:
      * @return std::string The module name, or empty string if extraction failed
      */
     static std::string getModuleName(const std::string& pluginPath);
-    
+
+    /**
+     * @brief Get the full raw metadata of a plugin as a compact JSON string,
+     *        without loading it.
+     *
+     * Reads the embedded "MetaData" object via QPluginLoader::metaData() (no
+     * plugin instantiation) and returns it serialized as compact JSON. This is
+     * the declarative metadata.json content (name, version, type, description,
+     * dependencies, author, logos_protocol_version, …) — it does NOT include
+     * methods/events, which are only available once the plugin is instantiated.
+     *
+     * @param pluginPath Path to the plugin file
+     * @return std::string Compact JSON object, or empty string if extraction failed
+     */
+    static std::string getRawMetadataJson(const std::string& pluginPath);
+
     /**
      * @brief Get the dependency list from a plugin file without loading it.
      * 
