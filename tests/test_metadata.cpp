@@ -79,6 +79,34 @@ TEST(MetadataTest, FromCustomMetadata_WithDependencies) {
     EXPECT_EQ(metadata.dependencies[2].toStdString(), "dep3");
 }
 
+TEST(MetadataTest, FromCustomMetadata_WithObjectDependencies) {
+    QJsonObject json;
+    json["name"] = "dependent_plugin";
+
+    QJsonObject constrained;
+    constrained["name"] = "dep2";
+    constrained["version"] = "=1.2.3";
+    constrained["signer"] = "did:jwk:abc";
+
+    QJsonObject named;
+    named["name"] = "dep3";
+
+    QJsonArray deps;
+    deps.append("dep1");
+    deps.append(constrained);
+    deps.append(named);
+    deps.append(QJsonObject());
+    json["dependencies"] = deps;
+
+    auto metadata = ModuleMetadata::fromCustomMetadata(json);
+
+    EXPECT_TRUE(metadata.isValid());
+    EXPECT_EQ(metadata.dependencies.size(), 3);
+    EXPECT_EQ(metadata.dependencies[0].toStdString(), "dep1");
+    EXPECT_EQ(metadata.dependencies[1].toStdString(), "dep2");
+    EXPECT_EQ(metadata.dependencies[2].toStdString(), "dep3");
+}
+
 TEST(MetadataTest, FromCustomMetadata_EmptyDependencies) {
     QJsonObject json;
     json["name"] = "no_deps_plugin";

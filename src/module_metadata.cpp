@@ -50,9 +50,13 @@ ModuleMetadata ModuleMetadata::fromCustomMetadata(const QJsonObject& customMetad
                                  .toJson(QJsonDocument::Compact)
                                  .toStdString();
     
+    // A dependency entry is either a bare name or an object holding that name
+    // alongside the constraints an installer resolves it by (version range,
+    // signer DID). Loading needs the name only.
     QJsonArray depsArray = customMetadata.value("dependencies").toArray();
     for (const QJsonValue& dep : depsArray) {
-        QString depName = dep.toString();
+        QString depName = dep.isObject() ? dep.toObject().value("name").toString()
+                                         : dep.toString();
         if (!depName.isEmpty()) {
             result.dependencies.append(depName);
         }
