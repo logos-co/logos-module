@@ -146,7 +146,7 @@ parsers that read Qt's embedded plugin metadata. `isValid()` returns true iff
 | Field | Type | Notes |
 |-------|------|-------|
 | `name`, `version`, `description`, `author`, `type` | `QString` | Core metadata fields |
-| `dependencies` | `QStringList` | Declared module dependency names |
+| `dependencies` | `QStringList` | Declared module dependency names, read from either manifest form (a bare name or `{name, version?, signer?}`) |
 | `rawMetadata` | `QJsonObject` | The full inner `MetaData` object (e.g. for reading `logos_protocol_version`) |
 | `rawMetadataJson` | `std::string` | Same metadata as a compact JSON string so Qt-free consumers parse it without QJson |
 
