@@ -6,6 +6,19 @@
 #include <memory>
 #include <vector>
 
+// popen/pclose are spelled with a leading underscore in the Windows CRT, and
+// _pclose returns the child's exit code directly rather than the encoded wait
+// status, so WEXITSTATUS (which lives in <sys/wait.h>, absent on mingw) neither
+// exists nor applies there.
+#ifdef _WIN32
+#define LOGOS_POPEN _popen
+#define LOGOS_PCLOSE _pclose
+#else
+#include <sys/wait.h>
+#define LOGOS_POPEN popen
+#define LOGOS_PCLOSE pclose
+#endif
+
 // =============================================================================
 // CLI Test Fixture
 // =============================================================================
@@ -63,19 +76,23 @@ protected:
         std::array<char, 4096> buffer;
         std::string output;
         
-        FILE* pipe = popen(command.c_str(), "r");
+        FILE* pipe = LOGOS_POPEN(command.c_str(), "r");
         if (!pipe) {
             result.exitCode = -1;
             return result;
         }
-        
+
         while (fgets(buffer.data(), buffer.size(), pipe) != nullptr) {
             output += buffer.data();
         }
-        
-        result.exitCode = pclose(pipe);
+
+        const int status = LOGOS_PCLOSE(pipe);
+#ifdef _WIN32
+        result.exitCode = status;
+#else
         // On Unix, the exit code is in the upper 8 bits
-        result.exitCode = WEXITSTATUS(result.exitCode);
+        result.exitCode = WEXITSTATUS(status);
+#endif
         result.output = output;
         
         return result;
