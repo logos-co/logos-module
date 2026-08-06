@@ -17,7 +17,8 @@ pkgs.stdenv.mkDerivation {
     cmake -S . -B build \
       -GNinja \
       -DCMAKE_BUILD_TYPE=Release \
-      -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0
+      -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 \
+      $cmakeFlags "''${cmakeFlagsArray[@]}"
     
     runHook postConfigure
   '';
