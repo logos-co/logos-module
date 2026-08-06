@@ -12,6 +12,15 @@
 
 #include <string>
 
+// Present since Windows 8 (and Windows 7 + KB2533623), but some mingw-w64
+// header sets only declare them under a higher _WIN32_WINNT.
+#ifndef LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR
+#define LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR 0x00000100
+#endif
+#ifndef LOAD_LIBRARY_SEARCH_DEFAULT_DIRS
+#define LOAD_LIBRARY_SEARCH_DEFAULT_DIRS 0x00001000
+#endif
+
 #endif
 
 namespace ModuleLib {
@@ -26,11 +35,23 @@ namespace ModuleLib {
 // dependency that could not be resolved. Measured on real Windows against our
 // pinned Qt 6.11.1: Qt still calls bare LoadLibrary().
 //
-// Mapping the plugin ourselves with LOAD_WITH_ALTERED_SEARCH_PATH makes Windows
-// use the plugin's OWN directory as the search root for that one load.
+// Mapping the plugin ourselves with LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR ADDS the
+// plugin's own directory to the search for that one load.
 // QPluginLoader then requests the same absolute path, the loader sees the image
 // is already mapped and returns the existing handle, so its load succeeds with
 // the vendored DLLs already bound.
+//
+// DLL_LOAD_DIR must be OR'd with DEFAULT_DIRS, and the pairing is the whole
+// point. LOAD_WITH_ALTERED_SEARCH_PATH -- the obvious-looking flag, and what
+// this used to do -- SUBSTITUTES the plugin's directory for the application
+// directory rather than adding to it. Measured consequence: loading
+// capability_module (whose Qt6RemoteObjects.dll lives only in the host's bin/)
+// failed the pre-load with ERROR_MOD_NOT_FOUND, because the exe directory had
+// been dropped from the search. It looked fine in a synthetic test only because
+// there the shared DLLs were already loaded by the host, and an
+// already-loaded module binds by base name before any directory is searched.
+// DEFAULT_DIRS keeps the application directory in play; DLL_LOAD_DIR adds the
+// module's own. Both are per-call, so no process-wide policy changes.
 //
 // The alternative -- SetDefaultDllDirectories + AddDllDirectory -- also works,
 // but changes the DLL search policy PROCESS-WIDE and accumulates one directory
@@ -40,11 +61,13 @@ namespace ModuleLib {
 // directory-per-module layout exists to provide. This is scoped to one load.
 void* preloadPluginWithOwnDirSearch(const QString& pluginPath)
 {
-    // LOAD_WITH_ALTERED_SEARCH_PATH is ignored unless the path is absolute.
+    // The LOAD_LIBRARY_SEARCH_* flags are ignored unless the path is absolute.
     const QString absolute = QFileInfo(pluginPath).absoluteFilePath();
     const std::wstring native = QDir::toNativeSeparators(absolute).toStdWString();
 
-    HMODULE handle = ::LoadLibraryExW(native.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+    HMODULE handle = ::LoadLibraryExW(
+        native.c_str(), nullptr,
+        LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
     if (!handle) {
         // Soft failure on purpose: QPluginLoader is left to produce its own
         // error, which is more informative than anything invented here.
