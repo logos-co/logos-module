@@ -314,6 +314,14 @@ private:
     ModuleMetadata m_metadata;
     QString m_errorString;
     bool m_isStatic = false;
+
+    // Windows only: an extra HMODULE reference taken on the plugin so that its
+    // own directory is searched for its private DLL dependencies. Held as void*
+    // rather than HMODULE on purpose -- pulling <windows.h> into this header
+    // would drag in winnt.h, which declares an enumerator literally named
+    // TokenSource and collides with the host's TokenSource namespace.
+    // Released in unload() to keep the loader refcount balanced.
+    void* m_nativeHandle = nullptr;
 };
 
 } // namespace ModuleLib
