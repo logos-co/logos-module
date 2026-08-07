@@ -13,7 +13,6 @@ set(MODULE_LIB_SOURCES
     src/module_metadata.cpp
     src/logos_module.cpp
     src/instance_persistence.cpp
-    src/win_dll_search.cpp
 )
 
 set(MODULE_LIB_HEADERS

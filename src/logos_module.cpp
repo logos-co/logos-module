@@ -80,6 +80,17 @@ LogosModule LogosModule::loadFromPath(const QString& pluginPath, QString* errorS
     // directory is searched for its private DLL dependencies. No-op off
     // Windows; see win_dll_search.h.
     module.m_nativeHandle = preloadPluginWithOwnDirSearch(pluginPath);
+#ifdef _WIN32
+    if (!module.m_nativeHandle) {
+        // Soft failure by design -- QPluginLoader is left to report the error,
+        // which is more informative than anything invented here. But say so:
+        // this warning is the ONLY evidence when the DLL-search pre-load
+        // regresses, and it is what caught LOAD_WITH_ALTERED_SEARCH_PATH
+        // silently substituting the module directory for the app directory.
+        qWarning() << "LogosModule: dependency pre-load failed for" << pluginPath
+                   << "GetLastError:" << lastPreloadError();
+    }
+#endif
 
     module.m_loader = new QPluginLoader(pluginPath);
 
