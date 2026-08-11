@@ -20,7 +20,8 @@ pkgs.stdenv.mkDerivation {
       -DCMAKE_BUILD_TYPE=Release \
       -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 \
       -DCMAKE_INSTALL_PREFIX=$out \
-      -DLOGOS_MODULE_BUILD_TESTS=ON
+      -DLOGOS_MODULE_BUILD_TESTS=ON \
+      $cmakeFlags "''${cmakeFlagsArray[@]}"
     
     runHook postConfigure
   '';

@@ -19,13 +19,13 @@
   ];
   
   # Common CMake flags
-  cmakeFlags = [ 
+  cmakeFlags = (pkgs.logosQtCrossCmakeFlags or [ ]) ++ [ 
     "-GNinja"
   ];
   
   # Metadata
   meta = with pkgs.lib; {
     description = "Logos Module Library - Qt plugin system abstraction layer";
-    platforms = platforms.unix;
+    platforms = platforms.unix ++ platforms.windows;
   };
 }

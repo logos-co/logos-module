@@ -1,5 +1,6 @@
 #include "logos_module.h"
 #include "logos_provider_plugin.h"
+#include "win_dll_search.h"
 #include <QMetaObject>
 #include <QMetaMethod>
 
@@ -45,10 +46,12 @@ LogosModule::LogosModule(LogosModule&& other) noexcept
     , m_metadata(std::move(other.m_metadata))
     , m_errorString(std::move(other.m_errorString))
     , m_isStatic(other.m_isStatic)
+    , m_nativeHandle(other.m_nativeHandle)
 {
     other.m_loader = nullptr;
     other.m_instance = nullptr;
     other.m_isStatic = false;
+    other.m_nativeHandle = nullptr;
 }
 
 LogosModule& LogosModule::operator=(LogosModule&& other) noexcept {
@@ -60,19 +63,37 @@ LogosModule& LogosModule::operator=(LogosModule&& other) noexcept {
         m_metadata = std::move(other.m_metadata);
         m_errorString = std::move(other.m_errorString);
         m_isStatic = other.m_isStatic;
-        
+        m_nativeHandle = other.m_nativeHandle;
+
         other.m_loader = nullptr;
         other.m_instance = nullptr;
         other.m_isStatic = false;
+        other.m_nativeHandle = nullptr;
     }
     return *this;
 }
 
 LogosModule LogosModule::loadFromPath(const QString& pluginPath, QString* errorString) {
     LogosModule module;
-    
+
+    // Must happen before the loader maps the image, so that the plugin's own
+    // directory is searched for its private DLL dependencies. No-op off
+    // Windows; see win_dll_search.h.
+    module.m_nativeHandle = preloadPluginWithOwnDirSearch(pluginPath);
+#ifdef _WIN32
+    if (!module.m_nativeHandle) {
+        // Soft failure by design -- QPluginLoader is left to report the error,
+        // which is more informative than anything invented here. But say so:
+        // this warning is the ONLY evidence when the DLL-search pre-load
+        // regresses, and it is what caught LOAD_WITH_ALTERED_SEARCH_PATH
+        // silently substituting the module directory for the app directory.
+        qWarning() << "LogosModule: dependency pre-load failed for" << pluginPath
+                   << "GetLastError:" << lastPreloadError();
+    }
+#endif
+
     module.m_loader = new QPluginLoader(pluginPath);
-    
+
     QJsonObject rawMetadata = module.m_loader->metaData();
     if (!rawMetadata.isEmpty()) {
         auto metadata = ModuleMetadata::fromJson(rawMetadata);
@@ -88,11 +109,13 @@ LogosModule LogosModule::loadFromPath(const QString& pluginPath, QString* errorS
         if (errorString) {
             *errorString = module.m_errorString;
         }
-        qWarning() << "LogosModule: Failed to load plugin:" << pluginPath 
+        qWarning() << "LogosModule: Failed to load plugin:" << pluginPath
                    << "Error:" << module.m_errorString;
-        
+
         delete module.m_loader;
         module.m_loader = nullptr;
+        releasePluginPreload(module.m_nativeHandle);
+        module.m_nativeHandle = nullptr;
         return module;
     }
     
@@ -208,15 +231,23 @@ void LogosModule::unload() {
     }
     m_loader = nullptr;
     m_instance = nullptr;
+    // Balance the reference taken in loadFromPath. Without this the image stays
+    // mapped after unload() and the module could never actually be reloaded.
+    releasePluginPreload(m_nativeHandle);
+    m_nativeHandle = nullptr;
 }
 
 QObject* LogosModule::release() {
     QObject* instance = m_instance;
-    
+
     m_loader = nullptr;
     m_instance = nullptr;
     m_isStatic = true;
-    
+    // Dropped, deliberately NOT freed: release() means the plugin outlives this
+    // wrapper, so the image must stay mapped. This intentionally leaks the
+    // reference, exactly as it already leaks the QPluginLoader.
+    m_nativeHandle = nullptr;
+
     return instance;
 }
 

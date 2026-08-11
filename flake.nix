@@ -14,7 +14,8 @@
       });
     in
     {
-      packages = forAllSystems ({ pkgs }: 
+      # "x86_64-windows" pseudo-system; realises on x86_64-linux.
+      packages = logos-nix.lib.forAllTargets ({ pkgs, ... }: 
         let
           # Common configuration
           common = import ./nix/default.nix { inherit pkgs; };

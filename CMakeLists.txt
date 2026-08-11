@@ -22,6 +22,7 @@ set(MODULE_LIB_HEADERS
     src/module_lib.h
     src/interface.h
     src/instance_persistence.h
+    src/win_dll_search.h
 )
 
 # Create the static library

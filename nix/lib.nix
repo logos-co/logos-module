@@ -14,11 +14,19 @@ pkgs.stdenv.mkDerivation {
   configurePhase = ''
     runHook preConfigure
     
+    # $cmakeFlags / cmakeFlagsArray carry everything nixpkgs computed for this
+    # platform. Dropping them is invisible natively but fatal when cross
+    # compiling: without -DCMAKE_SYSTEM_NAME=Windows (and the cross compiler
+    # settings) CMake believes it is targeting the build host, so find_package
+    # (Threads) takes the POSIX branch, finds no pthread -- mingw here uses
+    # mcfgthread -- and Qt6Config then fails with the misleading "Qt6 could not
+    # be found because dependency Threads could not be found".
     cmake -S . -B build \
       -GNinja \
       -DCMAKE_BUILD_TYPE=Release \
       -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 \
-      -DCMAKE_INSTALL_PREFIX=$out
+      -DCMAKE_INSTALL_PREFIX=$out \
+      $cmakeFlags "''${cmakeFlagsArray[@]}"
     
     runHook postConfigure
   '';
