@@ -180,15 +180,19 @@ std::string LogosModule::getRawMetadataJson(const std::string& pluginPath) {
 }
 
 std::vector<std::string> LogosModule::getModuleDependencies(const std::string& pluginPath) {
+    std::vector<std::string> result;
+    for (const ModuleDependency& dep : getModuleDependencyEntries(pluginPath)) {
+        result.push_back(dep.name);
+    }
+    return result;
+}
+
+std::vector<ModuleDependency> LogosModule::getModuleDependencyEntries(const std::string& pluginPath) {
     auto metadata = extractMetadata(QString::fromStdString(pluginPath));
     if (!metadata) {
         return {};
     }
-    std::vector<std::string> result;
-    for (const QString& dep : metadata->dependencies) {
-        result.push_back(dep.toStdString());
-    }
-    return result;
+    return metadata->dependencies;
 }
 
 LogosModule LogosModule::loadFromPath(const std::string& pluginPath, std::string* errorString) {

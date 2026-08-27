@@ -141,8 +141,8 @@ void printMetadataHuman(const ModuleMetadata& metadata) {
                 : protocolVersion)
         << "\n";
 
-    if (!metadata.dependencies.isEmpty()) {
-        out << "Dependencies: " << metadata.dependencies.join(", ") << "\n";
+    if (!metadata.dependencies.empty()) {
+        out << "Dependencies: " << metadata.dependencyNames().join(", ") << "\n";
     } else {
         out << "Dependencies: (none)\n";
     }
@@ -164,11 +164,7 @@ void printMetadataJson(const ModuleMetadata& metadata) {
             obj["logos_protocol_version"] = protocolVersion;
     }
 
-    QJsonArray deps;
-    for (const QString& dep : metadata.dependencies) {
-        deps.append(dep);
-    }
-    obj["dependencies"] = deps;
+    obj["dependencies"] = QJsonArray::fromStringList(metadata.dependencyNames());
     
     QJsonDocument doc(obj);
     out << doc.toJson(QJsonDocument::Indented);
@@ -459,11 +455,7 @@ int cmdInfo(const QString& pluginPath, bool jsonOutput, bool debugOutput) {
         metadataObj["author"] = metadata->author;
         metadataObj["type"] = metadata->type;
         
-        QJsonArray deps;
-        for (const QString& dep : metadata->dependencies) {
-            deps.append(dep);
-        }
-        metadataObj["dependencies"] = deps;
+        metadataObj["dependencies"] = QJsonArray::fromStringList(metadata->dependencyNames());
         
         combined["metadata"] = metadataObj;
         combined["methods"] = LogosModule::getMethodsAsJson(plugin.instance());

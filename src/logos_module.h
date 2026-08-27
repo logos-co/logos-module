@@ -163,6 +163,16 @@ public:
      * @return std::vector<std::string> The list of dependency names, or empty list if extraction failed
      */
     static std::vector<std::string> getModuleDependencies(const std::string& pluginPath);
+
+    /**
+     * @brief Same edges as getModuleDependencies, with the constraints each
+     *        entry declared (version range, signer). Bare-name entries come
+     *        back with both constraint fields empty.
+     *
+     * @param pluginPath Path to the plugin file
+     * @return std::vector<ModuleDependency> Declaration-order entries, or empty on failure
+     */
+    static std::vector<ModuleDependency> getModuleDependencyEntries(const std::string& pluginPath);
     
     /**
      * @brief Check if the handle contains a valid loaded plugin

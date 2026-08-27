@@ -6,8 +6,23 @@
 #include <QJsonObject>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace ModuleLib {
+
+/**
+ * @brief One entry of a module's declared `dependencies` array.
+ *
+ * metadata.json accepts two equivalent forms for the same edge: a bare name
+ * ("foo") and an object ({ "name": "foo", "version": "^2.0.0", "signer": ... }).
+ * Only the object form carries constraints; both declare the same dependency.
+ * std::string rather than QString so Qt-free consumers can use it directly.
+ */
+struct ModuleDependency {
+    std::string name;
+    std::string versionRange;  // empty when the entry declares no range
+    std::string signer;        // empty when the entry pins no signer
+};
 
 /**
  * @brief ModuleMetadata represents the metadata associated with a plugin/module.
@@ -22,7 +37,7 @@ struct ModuleMetadata {
     QString description;
     QString author;
     QString type;
-    QStringList dependencies;
+    std::vector<ModuleDependency> dependencies;
     
     // Raw JSON metadata for any additional fields
     QJsonObject rawMetadata;
@@ -35,6 +50,11 @@ struct ModuleMetadata {
      * @brief Check if the metadata is valid (has at least a name)
      */
     bool isValid() const { return !name.isEmpty(); }
+
+    /**
+     * @brief The dependency names only, in declaration order.
+     */
+    QStringList dependencyNames() const;
     
     /**
      * @brief Extract metadata from a plugin file without fully loading it.
