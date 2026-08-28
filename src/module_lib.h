@@ -11,6 +11,7 @@
  * 
  * Main components:
  * - ModuleMetadata: Plugin metadata extraction and storage
+ * - ModuleDirectory: Installed module directory layout (manifest, signature, main)
  * - LogosModule: Plugin loading, lifecycle management, and runtime introspection
  * 
  * Example usage:
@@ -44,6 +45,7 @@
  */
 
 #include "module_metadata.h"
+#include "module_directory.h"
 #include "logos_module.h"
 
 #endif // MODULE_LIB_H

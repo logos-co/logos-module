@@ -8,15 +8,41 @@ set(CMAKE_AUTOMOC ON)
 # Find Qt6
 find_package(Qt6 REQUIRED COMPONENTS Core)
 
+# lgx: logos-package's C ABI, which owns every format and integrity rule this
+# library reports. Required rather than optional — a build that cannot reach it
+# would have to answer "unknown" to every installed-directory check, and a
+# check that silently degrades is worse than no check at all.
+set(LOGOS_PACKAGE_ROOT "" CACHE PATH "Root of the lgx library (include/ and lib/)")
+find_path(LGX_INCLUDE_DIR lgx.h HINTS ${LOGOS_PACKAGE_ROOT}/include $ENV{LOGOS_PACKAGE_ROOT}/include)
+find_library(LGX_LIBRARY NAMES lgx liblgx HINTS ${LOGOS_PACKAGE_ROOT}/lib $ENV{LOGOS_PACKAGE_ROOT}/lib)
+if(NOT LGX_INCLUDE_DIR OR NOT LGX_LIBRARY)
+    message(FATAL_ERROR
+        "lgx not found. Pass -DLOGOS_PACKAGE_ROOT=<logos-package lib output>, "
+        "or build through nix, which supplies it. "
+        "(include: ${LGX_INCLUDE_DIR}, library: ${LGX_LIBRARY})")
+endif()
+
+# liblgx's install name is @rpath-relative, so an executable that links it finds
+# it only if the directory is on its rpath. Set before any target is created,
+# and inherited by cmd/ and tests/.
+if(UNIX)
+    get_filename_component(LGX_LIBRARY_DIR "${LGX_LIBRARY}" DIRECTORY)
+    list(APPEND CMAKE_BUILD_RPATH "${LGX_LIBRARY_DIR}")
+    list(APPEND CMAKE_INSTALL_RPATH "${LGX_LIBRARY_DIR}")
+endif()
+
 # Define source files
 set(MODULE_LIB_SOURCES
     src/module_metadata.cpp
+    src/module_directory.cpp
+    src/installed_checks.cpp
     src/logos_module.cpp
     src/instance_persistence.cpp
 )
 
 set(MODULE_LIB_HEADERS
     src/module_metadata.h
+    src/module_directory.h
     src/logos_module.h
     src/logos_provider_plugin.h
     src/module_lib.h
@@ -30,6 +56,11 @@ add_library(logos_module STATIC ${MODULE_LIB_SOURCES} ${MODULE_LIB_HEADERS})
 
 # Link Qt6
 target_link_libraries(logos_module PUBLIC Qt6::Core)
+
+# PRIVATE: lgx is an implementation detail — opening a ModuleDirectory resolves
+# `main` through it, and no lgx type reaches this library's headers.
+target_link_libraries(logos_module PRIVATE ${LGX_LIBRARY})
+target_include_directories(logos_module PRIVATE ${LGX_INCLUDE_DIR})
 
 # Include directories for building
 target_include_directories(logos_module PUBLIC

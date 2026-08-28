@@ -164,13 +164,13 @@ The library assigns each running instance of a module its own identity and stora
 
 ### The `lm` inspector
 
-`lm` is a command-line front-end that lets an operator or agent inspect a single plugin file. It exposes the library's identity and surface capabilities as subcommands, each able to produce either human-readable or machine-readable (JSON) output.
+`lm` is a command-line front-end that lets an operator or agent inspect a single plugin file, or the directory a package manager installed a package into. It exposes the library's identity and surface capabilities as subcommands, each able to produce either human-readable or machine-readable (JSON) output.
 
 ---
 
 ## The `lm` Command Surface
 
-`lm` takes a plugin file and reports on it. The first argument is either a subcommand or — when it is not a recognized subcommand and not an option — the plugin path itself, which selects the default (combined) view.
+`lm` takes a plugin file, or an installed module directory whose manifest names the plugin, and reports on it. The first argument is either a subcommand or — when it is not a recognized subcommand and not an option — the path itself, which selects the default (combined) view.
 
 | Invocation | Conceptual behavior |
 |------------|---------------------|
@@ -178,7 +178,8 @@ The library assigns each running instance of a module its own identity and stora
 | `lm metadata <plugin>` | Show **only the metadata**: name, version, description, author, type, protocol version, and dependencies. Read without loading the module. |
 | `lm methods <plugin>` | Show **only the methods** the module exposes. Requires loading the module. |
 | `lm events <plugin>` | Show **only the events** the module emits. Provider modules only; legacy modules show none. Requires loading the module. |
-| `lm --help` / `-h` / `<command> --help` | Show top-level usage, or per-subcommand help for `metadata` / `methods` / `events`. |
+| `lm verify <directory>` | Check an **installed directory** against its manifest: the manifest's own field rules, whether the installed files are still the ones its hashes cover, and whether `main`, `view` and the icon resolve. With a caller-supplied DID, also whether that party signed the manifest. |
+| `lm --help` / `-h` / `<command> --help` | Show top-level usage, or per-subcommand help for `metadata` / `methods` / `events` / `verify`. |
 | `lm --version` / `-v` | Show the inspector's version. |
 | `lm` (no arguments) | Show usage. |
 
@@ -188,6 +189,56 @@ The library assigns each running instance of a module its own identity and stora
 |--------|---------|
 | `--json` | Emit structured JSON instead of the human-readable layout. The default view emits a combined object with `metadata`, `methods`, and `events`; each subcommand emits just its own section. |
 | `--debug` | Show the diagnostic chatter a module may produce while being loaded. By default this output is suppressed so that the inspector's own output is clean. |
+| `--variant` | The variant to resolve the manifest's `main` with, when the directory does not record one. Repeatable, most preferred first. Directories only. |
+| `--did` | The DID whose key must have signed `manifest.json`. `verify` only. Without it, no signature question is asked and none is answered. |
+
+### Installed directories, and UI plugins as one of them
+
+An installed package is a directory, not a plugin with sidecars: a manifest, an
+optional detached signature, a record of which variant was extracted, and the
+payload. A UI plugin is the same directory with the same manifest — it merely
+adds a QML entry point and an icon, and its manifest's `type` is what permits it
+to carry no plugin binary at all. Everything below therefore applies to both,
+and neither the inspector nor its callers branch on the type to read a
+directory:
+
+- **The type decides whether a missing plugin is a fault.** A `ui_qml` package
+  that names a view and no main is complete; anything else with no main is
+  broken. The two are reported as different states, so a caller is never
+  silently permissive about the second.
+- **What a UI plugin adds is reported like anything else.** The view and the
+  icon are each reported as declared-and-present, declared-and-missing,
+  refused for pointing outside the directory, or not declared — the last being
+  the ordinary answer for a core module.
+- **A QML-only plugin has no embedded plugin metadata**, and that absence is a
+  normal state rather than an error.
+
+### Checking an installed directory
+
+The rules an installed package must satisfy are the package format's, so the
+inspector does not restate them: it asks the package library, over the exact
+bytes and files in the directory, and reports what comes back. It decides
+nothing — refusing to load a module is the host's call, and the exit status is
+the inspector's own.
+
+Three answers are kept apart, because collapsing them is what makes a check
+fail open:
+
+| Answer | Meaning |
+|--------|---------|
+| The tree matches its declared hash | Verified. |
+| It does not | Definitive: content was added, removed or altered. |
+| No hash was declared, the input was unusable, or the check could not run | Nothing was proved **and** nothing was disproved. Never a pass. |
+
+**Signatures are checked against a DID the caller names, never one read out of
+the signature.** A signature document carries the signer's DID, and verifying
+with the key that DID names proves only that the document agrees with itself:
+whoever replaces the signature replaces the DID beside it and signs with a key
+they own. The caller's DID — a pin, or one looked up in its own keyring — is
+the only input that makes the answer mean anything, so it is a required
+argument with no default and no overload that omits it. The DID the document
+claims is still reported, plainly labelled as self-asserted, because it is what
+a human needs in order to decide what to pin.
 
 ### Observable behavior
 
@@ -205,6 +256,8 @@ The library assigns each running instance of a module its own identity and stora
 | Metadata could not be extracted (metadata view) | `1` |
 | Module failed to load, or loaded with no usable instance (methods/events/default views) | `1` |
 | Unknown option, missing plugin path, or more than one plugin path given | `1` |
+| A directory whose manifest, main, or (for a non-`ui_qml` package) missing plugin cannot be resolved | `1` |
+| `verify`: a failed check, a signature that is not the named DID's, or a path that is not a directory | `1` |
 
 `lm` is non-interactive and never prompts: it reads its arguments, inspects the one named plugin, prints the result, and exits. This makes it directly drivable by scripts and AI agents, which can request `--json` and branch on the exit code.
 
@@ -222,6 +275,10 @@ lm metadata /path/to/plugin.so        # identity only
 lm methods /path/to/plugin.so --json  # callable surface as JSON
 lm events /path/to/plugin.so          # emitted events
 lm /path/to/plugin.so --debug         # include the module's load-time chatter
+
+lm /path/to/modules/my_module         # an installed directory, core or UI
+lm verify /path/to/plugins/my_ui      # check it against its manifest
+lm verify /path/to/plugins/my_ui --did did:jwk:...   # and against a pinned signer
 ```
 
 This is how a human confirms what a built artifact actually is, and how an agent discovers a module's available operations and their documented intent before deciding how to call them — without any external documentation.

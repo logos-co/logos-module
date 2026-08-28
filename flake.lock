@@ -19,6 +19,31 @@
         "type": "github"
       }
     },
+    "logos-package": {
+      "inputs": {
+        "logos-nix": [
+          "logos-nix"
+        ],
+        "nixpkgs": [
+          "logos-package",
+          "logos-nix",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1787930147,
+        "narHash": "sha256-NFsVZMfGO0FNQWD+JplmZwRe4nwZOKVd0iBOF1y5GQQ=",
+        "owner": "logos-co",
+        "repo": "logos-package",
+        "rev": "542305b1040771997251418a6bd1d4ac4f457950",
+        "type": "github"
+      },
+      "original": {
+        "owner": "logos-co",
+        "repo": "logos-package",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1759036355,
@@ -54,6 +79,7 @@
     "root": {
       "inputs": {
         "logos-nix": "logos-nix",
+        "logos-package": "logos-package",
         "nixpkgs": [
           "logos-nix",
           "nixpkgs"

@@ -58,6 +58,32 @@ lm events /path/to/plugin.dylib --json
 ```
 
 `methods` and `events` each list the corresponding half of the module's API.
+
+Every command also takes an **installed module directory** — the directory a
+package manager extracted a package into — and reads the plugin out of its
+`manifest.json`. A UI plugin (`type: "ui_qml"`) is such a directory too, and is
+inspected the same way; one that is QML only has no plugin, which is reported
+rather than treated as an error:
+
+```bash
+lm /path/to/modules/my_module
+lm /path/to/plugins/my_ui --json
+lm metadata /path/to/modules/my_module --variant linux-amd64
+```
+
+Check an installed directory against its manifest:
+```bash
+lm verify /path/to/modules/my_module
+lm verify /path/to/plugins/my_ui --json
+lm verify /path/to/modules/my_module --did did:jwk:eyJrdHkiOi...
+```
+
+`verify` runs logos-package's own checks — the manifest's field rules, whether
+the installed files still hash to what the manifest covers, and whether `main`,
+`view` and the icon resolve — and exits non-zero when one fails. The signature
+is checked only against a DID **you** name: the DID inside `manifest.sig` is
+never used as the key, because whoever replaces a signature replaces that DID
+beside it.
 When a method or event is documented with a `///` (or `/** … */`) doc comment in
 the module's header, `lm` prints that `description` beneath the signature (and
 includes it in `--json`). Events render with a `void` return (e.g.
@@ -112,3 +138,19 @@ The directory is created on disk automatically. Returns empty strings on failure
 ```bash
 nix develop
 ```
+
+## Doc-Tests
+
+`doctests/` holds executable documentation: each `*.test.yaml` builds `lm` from the
+commit under test and drives it against real plugins and real installed module
+directories, asserting on its output. The rendered Markdown under
+`doctests/outputs/` is generated from those specs, so it cannot drift from the tool.
+
+```bash
+./doctests/run.sh            # run every spec and regenerate outputs/
+```
+
+- [Inspecting a Logos Module with lm](doctests/outputs/lm-inspect.md) — metadata,
+  methods and events, module directories, and the four ways one fails to name a plugin
+- [Verifying an Installed Module Directory](doctests/outputs/lm-verify.md) — integrity,
+  signer pinning with `--did`, tampering and relabelling

@@ -1,0 +1,19 @@
+{
+  "author": "",
+  "category": "",
+  "dependencies": [],
+  "description": "",
+  "hashes": {
+    "root": "d6ac87fc4e90345a0299502610098bb7e14014e2d65cfefd3856cf1f1cc54eec",
+    "variants": "5e458d563b9fd4b01e3a758495928cf971234dca58acfff44ce053cb54d4a7c0",
+    "variants/darwin-arm64": "bbb7eb847a78222cf721ed138baa81c3f6d625568bc087460e3f2e04a7497422"
+  },
+  "icon": "",
+  "main": {
+    "darwin-arm64": "signed_module_plugin.dylib"
+  },
+  "manifestVersion": "0.5.0",
+  "name": "signed_module",
+  "type": "",
+  "version": "0.0.1"
+}

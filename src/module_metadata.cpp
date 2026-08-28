@@ -51,18 +51,37 @@ ModuleMetadata ModuleMetadata::fromCustomMetadata(const QJsonObject& customMetad
                                  .toStdString();
     
     // A dependency entry is either a bare name or an object holding that name
-    // alongside the constraints an installer resolves it by (version range,
-    // signer DID). Loading needs the name only.
+    // alongside the constraints it is resolved by (version range, signer DID).
+    // Both forms declare the same edge; the bare form simply constrains nothing.
     QJsonArray depsArray = customMetadata.value("dependencies").toArray();
     for (const QJsonValue& dep : depsArray) {
-        QString depName = dep.isObject() ? dep.toObject().value("name").toString()
-                                         : dep.toString();
-        if (!depName.isEmpty()) {
-            result.dependencies.append(depName);
+        ModuleDependency entry;
+        if (dep.isObject()) {
+            const QJsonObject obj = dep.toObject();
+            entry.name = obj.value("name").toString().toStdString();
+            entry.versionRange = obj.value("version").toString().toStdString();
+            entry.signer = obj.value("signer").toString().toStdString();
+            entry.malformedConstraint =
+                (obj.contains("version") && !obj.value("version").isString()) ||
+                (obj.contains("signer")  && !obj.value("signer").isString());
+        } else {
+            entry.name = dep.toString().toStdString();
+        }
+        if (!entry.name.empty()) {
+            result.dependencies.push_back(std::move(entry));
         }
     }
     
     return result;
+}
+
+QStringList ModuleMetadata::dependencyNames() const {
+    QStringList names;
+    names.reserve(static_cast<int>(dependencies.size()));
+    for (const ModuleDependency& dep : dependencies) {
+        names.append(QString::fromStdString(dep.name));
+    }
+    return names;
 }
 
 } // namespace ModuleLib

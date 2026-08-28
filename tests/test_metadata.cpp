@@ -73,10 +73,48 @@ TEST(MetadataTest, FromCustomMetadata_WithDependencies) {
     auto metadata = ModuleMetadata::fromCustomMetadata(json);
     
     EXPECT_TRUE(metadata.isValid());
-    EXPECT_EQ(metadata.dependencies.size(), 3);
-    EXPECT_EQ(metadata.dependencies[0].toStdString(), "dep1");
-    EXPECT_EQ(metadata.dependencies[1].toStdString(), "dep2");
-    EXPECT_EQ(metadata.dependencies[2].toStdString(), "dep3");
+    ASSERT_EQ(metadata.dependencies.size(), 3u);
+    EXPECT_EQ(metadata.dependencies[0].name, "dep1");
+    EXPECT_EQ(metadata.dependencies[1].name, "dep2");
+    EXPECT_EQ(metadata.dependencies[2].name, "dep3");
+    // The bare-string form declares the same edge with nothing constrained.
+    for (const auto& dep : metadata.dependencies) {
+        EXPECT_TRUE(dep.versionRange.empty());
+        EXPECT_TRUE(dep.signer.empty());
+    }
+}
+
+TEST(MetadataTest, FromCustomMetadata_UnquotedVersionIsMalformedNotAbsent) {
+    // `"version": 2` reads as absent through toString(); a consumer would then
+    // treat the edge as unconstrained and load against any installed version.
+    QJsonObject dep;
+    dep["name"] = "lib";
+    dep["version"] = 2;                       // a NUMBER, not a string
+    QJsonObject json;
+    json["name"] = "dependent_plugin";
+    json["dependencies"] = QJsonArray{dep};
+
+    const auto meta = ModuleLib::ModuleMetadata::fromCustomMetadata(json);
+
+    ASSERT_EQ(meta.dependencies.size(), 1u);
+    EXPECT_EQ(meta.dependencies[0].name, "lib");
+    EXPECT_TRUE(meta.dependencies[0].malformedConstraint);
+    EXPECT_TRUE(meta.dependencies[0].versionRange.empty());
+}
+
+TEST(MetadataTest, FromCustomMetadata_WellFormedConstraintIsNotMalformed) {
+    QJsonObject dep;
+    dep["name"] = "lib";
+    dep["version"] = "^2.0.0";
+    QJsonObject json;
+    json["name"] = "dependent_plugin";
+    json["dependencies"] = QJsonArray{dep};
+
+    const auto meta = ModuleLib::ModuleMetadata::fromCustomMetadata(json);
+
+    ASSERT_EQ(meta.dependencies.size(), 1u);
+    EXPECT_FALSE(meta.dependencies[0].malformedConstraint);
+    EXPECT_EQ(meta.dependencies[0].versionRange, "^2.0.0");
 }
 
 TEST(MetadataTest, FromCustomMetadata_WithObjectDependencies) {
@@ -101,10 +139,16 @@ TEST(MetadataTest, FromCustomMetadata_WithObjectDependencies) {
     auto metadata = ModuleMetadata::fromCustomMetadata(json);
 
     EXPECT_TRUE(metadata.isValid());
-    EXPECT_EQ(metadata.dependencies.size(), 3);
-    EXPECT_EQ(metadata.dependencies[0].toStdString(), "dep1");
-    EXPECT_EQ(metadata.dependencies[1].toStdString(), "dep2");
-    EXPECT_EQ(metadata.dependencies[2].toStdString(), "dep3");
+    ASSERT_EQ(metadata.dependencies.size(), 3u);
+    EXPECT_EQ(metadata.dependencies[0].name, "dep1");
+    EXPECT_TRUE(metadata.dependencies[0].versionRange.empty());
+    EXPECT_EQ(metadata.dependencies[1].name, "dep2");
+    EXPECT_EQ(metadata.dependencies[1].versionRange, "=1.2.3");
+    EXPECT_EQ(metadata.dependencies[1].signer, "did:jwk:abc");
+    EXPECT_EQ(metadata.dependencies[2].name, "dep3");
+    EXPECT_TRUE(metadata.dependencies[2].versionRange.empty());
+    EXPECT_EQ(metadata.dependencyNames(),
+              (QStringList{"dep1", "dep2", "dep3"}));
 }
 
 TEST(MetadataTest, FromCustomMetadata_EmptyDependencies) {
@@ -115,7 +159,7 @@ TEST(MetadataTest, FromCustomMetadata_EmptyDependencies) {
     auto metadata = ModuleMetadata::fromCustomMetadata(json);
     
     EXPECT_TRUE(metadata.isValid());
-    EXPECT_TRUE(metadata.dependencies.isEmpty());
+    EXPECT_TRUE(metadata.dependencies.empty());
 }
 
 TEST(MetadataTest, FromCustomMetadata_WithDisplayName) {
@@ -265,6 +309,10 @@ TEST(GetModuleDependenciesTest, EmptyPath_ReturnsEmpty) {
 TEST(GetModuleDependenciesTest, InvalidFile_ReturnsEmpty) {
     std::vector<std::string> deps = LogosModule::getModuleDependencies("/dev/null");
     EXPECT_TRUE(deps.empty());
+}
+
+TEST(GetModuleDependenciesTest, EntriesInvalidFile_ReturnsEmpty) {
+    EXPECT_TRUE(LogosModule::getModuleDependencyEntries("/dev/null").empty());
 }
 
 // =============================================================================

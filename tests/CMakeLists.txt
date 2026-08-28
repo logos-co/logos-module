@@ -2,6 +2,8 @@
 
 add_executable(logos_module_tests
     test_metadata.cpp
+    test_module_directory.cpp
+    test_installed_checks.cpp
     test_introspection.cpp
     test_cli.cpp
     test_instance_persistence.cpp
@@ -23,6 +25,12 @@ else()
         gtest_main
     )
 endif()
+
+# The fixture directories, by absolute source path. Not searched for at
+# runtime: a fixture that cannot be found must fail the run, and a test that
+# skips instead renders as a pass.
+target_compile_definitions(logos_module_tests PRIVATE
+    LOGOS_MODULE_TEST_EXAMPLES="${CMAKE_CURRENT_SOURCE_DIR}/examples")
 
 # Discover tests
 gtest_discover_tests(logos_module_tests)
