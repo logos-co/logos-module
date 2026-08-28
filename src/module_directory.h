@@ -238,14 +238,11 @@ public:
      * @param candidateVariants  Variant spellings to accept when `main` is a
      *   variant map, most preferred first.
      *
-     * The variant list is CALLER-SUPPLIED on purpose. Variant names have more
-     * than one live spelling in this ecosystem (`darwin-x86_64` vs
-     * `darwin-amd64`, and the `-dev` suffix a non-portable build appends), the
-     * alias table that reconciles them already exists in the package manager,
-     * and a second copy here would be a third spelling authority that drifts
-     * from both. Pass the host's own list — lgpm's
-     * PackageManagerLib::platformVariantsToTry(). This library enumerates no
-     * spelling of its own.
+     * The variant list is CALLER-SUPPLIED on purpose. A host that appends its
+     * own build-variant suffix (lgpm's `-dev`) is the only thing that knows it,
+     * so pass that host's list — lgpm's
+     * PackageManagerLib::platformVariantsToTry(). hostVariants() is the plain
+     * answer for a caller with no such suffix.
      *
      * When the list is empty, the installed `variant` file is the sole
      * candidate: it records exactly what was extracted here, so it resolves
@@ -259,6 +256,20 @@ public:
      */
     static ModuleDirectory open(const std::string& directoryPath,
                                 const std::vector<std::string>& candidateVariants = {});
+
+    /**
+     * @brief The variant spellings THIS HOST accepts, from logos-package.
+     *
+     * `<os>-<arch>` for the machine this build runs on, then the other live
+     * spellings of its architecture — the list to hand open() when the caller
+     * has none of its own. Only the architecture is aliased, so a foreign OS is
+     * never in it.
+     *
+     * Compare against installedVariant(); do not enforce. A package manager may
+     * append a build-variant suffix this library cannot know, so a directory
+     * whose variant is absent here can still be a correct install.
+     */
+    static QStringList hostVariants();
 
     /**
      * @brief The directory itself, absolute.

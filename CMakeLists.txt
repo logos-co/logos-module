@@ -57,8 +57,8 @@ add_library(logos_module STATIC ${MODULE_LIB_SOURCES} ${MODULE_LIB_HEADERS})
 # Link Qt6
 target_link_libraries(logos_module PUBLIC Qt6::Core)
 
-# PRIVATE, and confined to installed_checks.cpp: a consumer that only opens a
-# ModuleDirectory pulls no object referencing lgx and needs no -llgx.
+# PRIVATE: lgx is an implementation detail — opening a ModuleDirectory resolves
+# `main` through it, and no lgx type reaches this library's headers.
 target_link_libraries(logos_module PRIVATE ${LGX_LIBRARY})
 target_include_directories(logos_module PRIVATE ${LGX_INCLUDE_DIR})
 

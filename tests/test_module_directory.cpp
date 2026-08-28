@@ -239,6 +239,42 @@ TEST_F(ModuleDirectoryTest, Variant_BlankFileIsMalformedNotAbsent) {
     EXPECT_TRUE(dir.installedVariant().isEmpty());
 }
 
+// hostVariants() is the spelling table logos-package owns, reached from here.
+// Asserting the SHAPE, not this builder's host, so the test reads the same on
+// every runner.
+TEST_F(ModuleDirectoryTest, Variant_HostVariantsLeadWithThisMachine) {
+    const QStringList hosts = ModuleDirectory::hostVariants();
+
+    ASSERT_FALSE(hosts.isEmpty());
+    EXPECT_NE(hosts.front(), QStringLiteral("unknown"));
+    EXPECT_TRUE(hosts.front().contains(QLatin1Char('-')));
+    // Aliases widen the ARCHITECTURE only: every entry names the same OS.
+    const QString os = hosts.front().left(hosts.front().lastIndexOf(QLatin1Char('-')));
+    for (const QString& variant : hosts) {
+        EXPECT_TRUE(variant.startsWith(os + QLatin1Char('-')))
+            << qPrintable(variant) << " is not an " << qPrintable(os) << " variant";
+    }
+}
+
+TEST_F(ModuleDirectoryTest, Variant_HostVariantsResolveAMainWrittenInEitherSpelling) {
+    // The point of the table: a package produced with one arch spelling
+    // resolves on a host that computes the other.
+    const QStringList hosts = ModuleDirectory::hostVariants();
+    ASSERT_FALSE(hosts.isEmpty());
+
+    for (const QString& spelling : hosts) {
+        makeModuleDir();
+        writeFile(QStringLiteral("manifest.json"),
+                  QStringLiteral(R"({"name":"m","main":{"%1":"p.so"}})").arg(spelling).toUtf8());
+        writeFile(QStringLiteral("p.so"), "ELF");
+
+        ModuleDirectory dir = ModuleDirectory::open(moduleDir(), hosts);
+
+        EXPECT_TRUE(dir.main().isResolved()) << qPrintable(spelling);
+        EXPECT_EQ(dir.main().variant, spelling);
+    }
+}
+
 // =============================================================================
 // main resolution
 // =============================================================================

@@ -1,5 +1,5 @@
-// ModuleDirectory's checks. Split out so that only this object file references
-// lgx: a consumer that merely opens a directory links no logos-package.
+// ModuleDirectory's checks against logos-package, split out from the probing
+// that finds the files they run on.
 #include "module_directory.h"
 
 #include <lgx.h>

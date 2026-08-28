@@ -1,11 +1,14 @@
 #include "module_directory.h"
 
+#include <lgx.h>
+
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonParseError>
 #include <QJsonValue>
+#include <vector>
 
 namespace ModuleLib {
 
@@ -112,97 +115,53 @@ QString containedPath(const QDir& dir, const QString& declaredPath)
     return candidate;
 }
 
-MainFile locateMain(const QDir& dir, const QString& declaredPath, const QString& variant)
+MainResolution fromLgx(lgx_main_resolution_t state)
 {
-    MainFile result;
-    result.declaredPath = declaredPath;
-    result.variant = variant;
-
-    const QString candidate = containedPath(dir, declaredPath);
-    if (candidate.isEmpty()) {
-        result.state = MainResolution::MalformedEntry;
-        result.error = QStringLiteral("main '%1' resolves outside the module directory")
-                           .arg(declaredPath);
-        return result;
+    switch (state) {
+        case LGX_MAIN_RESOLVED:         return MainResolution::Resolved;
+        case LGX_MAIN_NOT_DECLARED:     return MainResolution::NotDeclared;
+        case LGX_MAIN_MALFORMED_ENTRY:  return MainResolution::MalformedEntry;
+        case LGX_MAIN_NO_VARIANT_MATCH: return MainResolution::NoVariantMatch;
+        case LGX_MAIN_FILE_MISSING:     return MainResolution::FileMissing;
+        case LGX_MAIN_BAD_INPUT:        break;
     }
-
-    // isFile(), not exists(): a directory named as `main` is not a plugin, and
-    // exists() would hand the caller a path it cannot load. Symlinks are
-    // followed, so a symlinked plugin still resolves.
-    const QFileInfo candidateInfo(candidate);
-    if (!candidateInfo.exists()) {
-        result.state = MainResolution::FileMissing;
-        result.error = QStringLiteral("main '%1' is not present in the module directory")
-                           .arg(declaredPath);
-        return result;
-    }
-    if (!candidateInfo.isFile()) {
-        result.state = MainResolution::MalformedEntry;
-        result.error = QStringLiteral("main '%1' is not a file")
-                           .arg(declaredPath);
-        return result;
-    }
-
-    result.state = MainResolution::Resolved;
-    result.path = candidate;
-    return result;
+    // BadInput means bytes that are not a JSON object, which readManifest has
+    // already ruled out here — so there is no manifest left to consult.
+    return MainResolution::NoManifest;
 }
 
-// Mirrors the package manager's resolveMainFilePath: the first candidate
-// variant that is a key wins outright, and a named-but-missing file does NOT
-// fall through to a later variant. Same resolution, better reporting — where
-// that function returns one empty string this names the reason, and where it
-// would throw on a non-string value this reports MalformedEntry.
-MainFile resolveMain(const QJsonObject& manifest, const QDir& dir, const QStringList& variants)
+// Resolution itself is logos-package's: a `main` key is a variant name, and
+// variant names are keys of the signed hash tree that library writes. This is
+// the marshalling, and the resolution rules live with the format.
+MainFile resolveMain(const QByteArray& manifestBytes, const QDir& dir, const QStringList& variants)
 {
+    std::vector<QByteArray> utf8;
+    std::vector<const char*> candidates;
+    utf8.reserve(static_cast<size_t>(variants.size()));
+    candidates.reserve(static_cast<size_t>(variants.size()) + 1);
+    for (const QString& variant : variants) {
+        utf8.push_back(variant.toUtf8());
+        candidates.push_back(utf8.back().constData());
+    }
+    candidates.push_back(nullptr);
+
+    const QByteArray dirPath = QDir::toNativeSeparators(dir.absolutePath()).toUtf8();
+    lgx_main_file_t resolved = lgx_resolve_main(dirPath.constData(),
+                                                manifestBytes.constData(),
+                                                static_cast<size_t>(manifestBytes.size()),
+                                                candidates.data());
+
     MainFile result;
-
-    if (!manifest.contains(QStringLiteral("main"))) {
-        result.state = MainResolution::NotDeclared;
-        return result;
+    result.state = fromLgx(resolved.state);
+    // lgx speaks native separators; every path this library reports is Qt's.
+    if (resolved.path) {
+        result.path = QDir::cleanPath(
+            QDir::fromNativeSeparators(QString::fromUtf8(resolved.path)));
     }
-    const QJsonValue mainValue = manifest.value(QStringLiteral("main"));
-
-    if (mainValue.isObject()) {
-        const QJsonObject mainObject = mainValue.toObject();
-        QString unusable;
-        for (const QString& variant : variants) {
-            if (!mainObject.contains(variant)) {
-                continue;
-            }
-            const QJsonValue declared = mainObject.value(variant);
-            if (!declared.isString() || declared.toString().isEmpty()) {
-                if (unusable.isEmpty()) {
-                    unusable = variant;
-                }
-                continue;
-            }
-            return locateMain(dir, declared.toString(), variant);
-        }
-        if (!unusable.isEmpty()) {
-            result.state = MainResolution::MalformedEntry;
-            result.variant = unusable;
-            result.error = QStringLiteral("main['%1'] is not a non-empty string").arg(unusable);
-            return result;
-        }
-        result.state = MainResolution::NoVariantMatch;
-        result.error = QStringLiteral("no candidate variant [%1] is a key of main")
-                           .arg(variants.join(QStringLiteral(", ")));
-        return result;
-    }
-
-    if (mainValue.isString()) {
-        const QString declared = mainValue.toString();
-        if (declared.isEmpty()) {
-            result.state = MainResolution::MalformedEntry;
-            result.error = QStringLiteral("main is an empty string");
-            return result;
-        }
-        return locateMain(dir, declared, QString());
-    }
-
-    result.state = MainResolution::MalformedEntry;
-    result.error = QStringLiteral("main is neither a variant map nor a string");
+    if (resolved.declared_path) result.declaredPath = QString::fromUtf8(resolved.declared_path);
+    if (resolved.variant) result.variant = QString::fromUtf8(resolved.variant);
+    if (resolved.error) result.error = QString::fromUtf8(resolved.error);
+    lgx_free_main_file(resolved);
     return result;
 }
 
@@ -312,7 +271,7 @@ ModuleDirectory ModuleDirectory::open(const QString& directoryPath,
     }
 
     if (result.m_manifest.isPresent()) {
-        result.m_main = resolveMain(result.m_manifest.parsed, dir, result.m_candidateVariants);
+        result.m_main = resolveMain(result.m_manifest.bytes, dir, result.m_candidateVariants);
         result.m_view = resolveAsset(result.m_manifest.parsed, dir, QStringLiteral("view"));
         result.m_icon = resolveAsset(result.m_manifest.parsed, dir, QStringLiteral("icon"));
     } else {
@@ -333,6 +292,20 @@ ModuleDirectory ModuleDirectory::open(const std::string& directoryPath,
         variants.append(QString::fromStdString(variant));
     }
     return open(QString::fromStdString(directoryPath), variants);
+}
+
+QStringList ModuleDirectory::hostVariants()
+{
+    QStringList variants;
+    const char** spellings = lgx_variant_spellings(lgx_host_variant());
+    if (!spellings) {
+        return variants;
+    }
+    for (const char** spelling = spellings; *spelling != nullptr; ++spelling) {
+        variants.append(QString::fromUtf8(*spelling));
+    }
+    lgx_free_string_array(spellings);
+    return variants;
 }
 
 QString ModuleDirectory::manifestName() const
