@@ -396,24 +396,32 @@ TEST_PLUGIN=$(pwd)/tests/examples/package_manager_plugin.so \
 1. Checkout, install Nix with flakes enabled.
 2. `nix build .#ci`.
 3. Run `./result/bin/logos_module_tests --gtest_filter=-CLIPluginTest.*`
-   with `LM_BINARY` and `TEST_PLUGIN` exported.
+   with `LM_BINARY`, `TEST_PLUGIN` and `LOGOS_MODULE_TEST_EXAMPLES` exported.
+   The last points at the checkout's `tests/examples`: the binary's
+   compile-time default names the nix build sandbox, which is gone by then.
 
 ## `lm` Command Reference
 
 ```
-Usage: lm [command] [options] <plugin-path>
+Usage: lm [command] [options] <module-path>
+
+<module-path> is a plugin file, or an installed module directory whose
+manifest.json names the plugin.
 
 Commands:
   (default)   Show metadata, methods, and events (when no command specified)
   metadata    Show plugin metadata (name, version, description, etc.)
   methods     Show plugin methods and signatures
   events      Show plugin events and signatures
+  verify      Check an installed module directory against its manifest
 
 Options:
-  --json         Output in JSON format
-  --debug        Show debug output from plugin loading
-  --help, -h     Show help information
-  --version, -v  Show version information
+  --json               Output in JSON format
+  --variant <name>     Variant to resolve manifest.json's main with (directories only)
+  --did <did:jwk:...>  Whose signature manifest.sig must carry (verify only)
+  --debug              Show debug output from plugin loading
+  --help, -h           Show help information
+  --version, -v        Show version information
 ```
 
 | Invocation | Behavior | Exit |
@@ -422,9 +430,18 @@ Options:
 | `lm metadata <plugin-path>` | Print only metadata: `Name`, `Version`, `Description`, `Author`, `Type`, `Protocol` (`logos_protocol_version`, or `(unstamped — pre-protocol build)` when absent), `Dependencies` (or `(none)`). Extracts metadata **without loading** the plugin | 0; 1 if file not found or extraction fails |
 | `lm methods <plugin-path>` | Print only methods (loads the plugin): for each, the rendered `<returnType> <name>(<type> <param>, …)`, `Signature`, `Invokable`, and an optional indented `Description` | 0; 1 if file not found / load fails / null instance |
 | `lm events <plugin-path>` | Print only events (new-API providers only), rendered as `void <name>(<args>)` plus `Signature` and optional `Description`. Legacy plugins report `(no events found)` | 0; 1 if file not found / load fails / null instance |
-| `lm --help` / `-h`, `lm <command> --help` | Top-level usage, or per-command help for `metadata` / `methods` / `events` | 0 |
+| `lm verify <module-directory>` | Run every check that survives installation, through logos-package: the manifest's own field rules, whether the tree still hashes to `hashes["variants/<variant>"]`, and whether `main`, `view` and the icon resolve. With `--did`, also whether that DID's key signed `manifest.json` | 0; 1 if a check fails, if `--did` was given and the signature is not that DID's, or if the path is not a directory |
+| `lm --help` / `-h`, `lm <command> --help` | Top-level usage, or per-command help for `metadata` / `methods` / `events` / `verify` | 0 |
 | `lm --version` / `-v` | Prints `lm (Logos Module) version 0.1.0` | 0 |
 | `lm` (no args) | Prints usage | 0 |
+
+Given a directory, every command first prints a **Module Directory** report —
+path, declared type, manifest and signature sizes, installed variant, resolved
+main, `view` and `icon` when the manifest names them, and the payload listing.
+Under `--json` the same report is a `module_directory` object inside the
+document (`methods` / `events` stay bare arrays and carry none). A `ui_qml`
+package that declares a `view` and no `main` has no plugin: the three plugin
+sections are replaced by one line saying so, and the exit code stays 0.
 
 An unknown option (`lm metadata --bogus plugin.so`) or a first argument that
 starts with `-` and isn't `-h`/`-v` prints `Error: Unknown option …` and exits
@@ -452,6 +469,18 @@ lm methods  /path/to/plugin.so --json --debug
 lm events   /path/to/plugin.so
 
 lm --version    # lm (Logos Module) version 0.1.0
+```
+
+### Inspecting and checking an installed directory
+
+```bash
+# A core module and a UI plugin are the same kind of directory
+lm /path/to/modules/my_module
+lm /path/to/plugins/my_ui --json
+
+# Check it against its manifest; --did names whose signature it must carry
+lm verify /path/to/modules/my_module
+lm verify /path/to/plugins/my_ui --did did:jwk:eyJrdHkiOi...
 ```
 
 ### Reading a module's name / deps / metadata without loading it
