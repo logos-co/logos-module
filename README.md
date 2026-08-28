@@ -138,3 +138,19 @@ The directory is created on disk automatically. Returns empty strings on failure
 ```bash
 nix develop
 ```
+
+## Doc-Tests
+
+`doctests/` holds executable documentation: each `*.test.yaml` builds `lm` from the
+commit under test and drives it against real plugins and real installed module
+directories, asserting on its output. The rendered Markdown under
+`doctests/outputs/` is generated from those specs, so it cannot drift from the tool.
+
+```bash
+./doctests/run.sh            # run every spec and regenerate outputs/
+```
+
+- [Inspecting a Logos Module with lm](doctests/outputs/lm-inspect.md) — metadata,
+  methods and events, module directories, and the four ways one fails to name a plugin
+- [Verifying an Installed Module Directory](doctests/outputs/lm-verify.md) — integrity,
+  signer pinning with `--did`, tampering and relabelling
