@@ -101,7 +101,8 @@ sections:
             "Darwin x86_64")  echo darwin-x86_64 > variant.txt; echo dylib > ext.txt ;;
             *) echo "unsupported platform: $(uname -sm)" >&2; exit 1 ;;
           esac
-          echo "variant: $(cat variant.txt)  ext: $(cat ext.txt)"
+          test -s variant.txt && test -s ext.txt \
+            && echo "variant: $(cat variant.txt)  ext: $(cat ext.txt)"
         expect_contains:
           - "variant: "
 

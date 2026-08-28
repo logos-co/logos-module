@@ -63,7 +63,7 @@ ends of the same rules: `lgx` writes the hashes and the signature into a package
 
 ```bash
 # From inside the clone this is simply: nix build '.#lm' -o lm
-nix build 'github:logos-co/logos-module/b55063d90156ff40395f70b16af8aeaaf88ac641#lm' -o lm
+nix build 'github:logos-co/logos-module/b55063d#lm' -o lm
 ```
 
 ### 1.2 Build lgx
@@ -104,7 +104,8 @@ case "$(uname -s) $(uname -m)" in
   "Darwin x86_64")  echo darwin-x86_64 > variant.txt; echo dylib > ext.txt ;;
   *) echo "unsupported platform: $(uname -sm)" >&2; exit 1 ;;
 esac
-echo "variant: $(cat variant.txt)  ext: $(cat ext.txt)"
+test -s variant.txt && test -s ext.txt \
+  && echo "variant: $(cat variant.txt)  ext: $(cat ext.txt)"
 
 ```
 

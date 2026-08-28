@@ -290,7 +290,10 @@ sections:
           }
           EOF
           echo "$V" > modules/greeter/variant
-          echo "installed greeter for variant $V"
+          # Guarded: an unconditional echo would keep this step green even if
+          # the assembly above had failed.
+          test -f modules/greeter/manifest.json && test -f modules/greeter/variant \
+            && echo "installed greeter for variant $V"
         code_block: |
           case "$(uname -s) $(uname -m)" in
             "Linux x86_64")   V=linux-x86_64 ;;
@@ -394,7 +397,8 @@ sections:
           }
           EOF
           echo "$V" > plugins/greeter_ui/variant
-          echo "assembled greeter_ui"
+          test -f plugins/greeter_ui/manifest.json && test -f plugins/greeter_ui/qml/Main.qml \
+            && echo "assembled greeter_ui"
         expect_contains:
           - "assembled greeter_ui"
 

@@ -59,7 +59,7 @@ result as `./lm`, so the binary lands at `./lm/bin/lm`.
 
 ```bash
 # From inside the clone this is simply: nix build '.#lm' -o lm
-nix build 'github:logos-co/logos-module/b55063d90156ff40395f70b16af8aeaaf88ac641#lm' -o lm
+nix build 'github:logos-co/logos-module/b55063d#lm' -o lm
 ```
 
 ### 1.2 Confirm it runs
@@ -167,7 +167,7 @@ name differs per platform.
 
 ```bash
 # {ext} is `so` on Linux, `dylib` on macOS.
-nix develop 'github:logos-co/logos-module/b55063d90156ff40395f70b16af8aeaaf88ac641' --command bash -c \
+nix develop 'github:logos-co/logos-module/b55063d' --command bash -c \
   'cmake -S . -B build -DLOGOS_MODULE_EXT=so >/dev/null && cmake --build build >/dev/null'
 ```
 
@@ -338,7 +338,8 @@ cat > plugins/greeter_ui/manifest.json <<'EOF'
 }
 EOF
 echo "$V" > plugins/greeter_ui/variant
-echo "assembled greeter_ui"
+test -f plugins/greeter_ui/manifest.json && test -f plugins/greeter_ui/qml/Main.qml \
+  && echo "assembled greeter_ui"
 
 ```
 
