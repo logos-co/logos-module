@@ -1,17 +1,20 @@
 #include <QCoreApplication>
 #include <QTextStream>
+#include <QDir>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QStringList>
 #include <QFileInfo>
 #include <iostream>
+#include <optional>
 #include <vector>
 #include <string>
 #include <unistd.h>
 #include <fcntl.h>
 
 #include "logos_module.h"
+#include "module_directory.h"
 #include "module_metadata.h"
 
 using namespace ModuleLib;
@@ -62,7 +65,11 @@ void printVersion() {
 void printUsage() {
     out << "lm - Logos Module Inspector\n"
         << "\n"
-        << "Usage: lm [command] [options] <plugin-path>\n"
+        << "Usage: lm [command] [options] <module-path>\n"
+        << "\n"
+        << "<module-path> is either a plugin file, or an installed module directory\n"
+        << "whose manifest.json names the plugin. A directory also reports its\n"
+        << "manifest, signature and installed variant; a bare plugin file has none.\n"
         << "\n"
         << "Commands:\n"
         << "  (default)   Show metadata, methods, and events (when no command specified)\n"
@@ -72,6 +79,8 @@ void printUsage() {
         << "\n"
         << "Options:\n"
         << "  --json      Output in JSON format\n"
+        << "  --variant <name>  Variant to resolve manifest.json's main with\n"
+        << "              (repeatable, directories only; defaults to the installed one)\n"
         << "  --debug     Show debug output from plugin loading\n"
         << "  --help, -h  Show help information\n"
         << "  --version, -v  Show version information\n"
@@ -79,39 +88,52 @@ void printUsage() {
         << "Examples:\n"
         << "  lm /path/to/plugin.so\n"
         << "  lm /path/to/plugin.so --json\n"
+        << "  lm /path/to/modules/my_module\n"
         << "  lm metadata /path/to/plugin.so\n"
         << "  lm methods /path/to/plugin.so\n"
         << "  lm metadata /path/to/plugin.so --json\n"
-        << "  lm methods /path/to/plugin.so --json --debug\n";
+        << "  lm methods /path/to/plugin.so --json --debug\n"
+        << "  lm metadata /path/to/modules/my_module --variant linux-amd64\n";
 }
 
 void printCommandHelp(const QString& command) {
+    // Every command takes the same <module-path>: a plugin file or a module
+    // directory. Only the object-shaped JSON commands can carry the directory
+    // report, so each help text says which one the reader is looking at.
     if (command == "metadata") {
-        out << "Usage: lm metadata [options] <plugin-path>\n"
+        out << "Usage: lm metadata [options] <module-path>\n"
             << "\n"
             << "Show plugin metadata including name, version, description, author,\n"
-            << "type, and dependencies.\n"
+            << "type, and dependencies. Given a module directory, the JSON also\n"
+            << "carries a \"module_directory\" object describing the install.\n"
             << "\n"
             << "Options:\n"
             << "  --json   Output in JSON format\n"
+            << "  --variant <name>  Variant to resolve manifest.json's main with\n"
             << "  --debug  Show debug output from plugin loading\n";
     } else if (command == "methods") {
-        out << "Usage: lm methods [options] <plugin-path>\n"
+        out << "Usage: lm methods [options] <module-path>\n"
             << "\n"
             << "Show all methods exposed by the plugin via Qt's meta-object system.\n"
             << "Displays method name, signature, return type, and parameters.\n"
+            << "Given a module directory, the plugin is the main from manifest.json;\n"
+            << "the JSON stays a bare array, so use `lm <dir> --json` for the install.\n"
             << "\n"
             << "Options:\n"
             << "  --json   Output in JSON format\n"
+            << "  --variant <name>  Variant to resolve manifest.json's main with\n"
             << "  --debug  Show debug output from plugin loading\n";
     } else if (command == "events") {
-        out << "Usage: lm events [options] <plugin-path>\n"
+        out << "Usage: lm events [options] <module-path>\n"
             << "\n"
             << "Show all events the plugin can emit (its `logos_events:` section).\n"
             << "Displays event name, signature, parameters, and description.\n"
+            << "Given a module directory, the plugin is the main from manifest.json;\n"
+            << "the JSON stays a bare array, so use `lm <dir> --json` for the install.\n"
             << "\n"
             << "Options:\n"
             << "  --json   Output in JSON format\n"
+            << "  --variant <name>  Variant to resolve manifest.json's main with\n"
             << "  --debug  Show debug output from plugin loading\n";
     }
 }
@@ -148,7 +170,9 @@ void printMetadataHuman(const ModuleMetadata& metadata) {
     }
 }
 
-void printMetadataJson(const ModuleMetadata& metadata) {
+// dirObj is null for a plugin file, which genuinely has no manifest — the key
+// is then absent rather than empty, so neither can be mistaken for the other.
+void printMetadataJson(const ModuleMetadata& metadata, const QJsonObject* dirObj) {
     QJsonObject obj;
     obj["name"] = metadata.name;
     if (!metadata.displayName.isEmpty())
@@ -165,7 +189,9 @@ void printMetadataJson(const ModuleMetadata& metadata) {
     }
 
     obj["dependencies"] = QJsonArray::fromStringList(metadata.dependencyNames());
-    
+    if (dirObj)
+        obj["module_directory"] = *dirObj;
+
     QJsonDocument doc(obj);
     out << doc.toJson(QJsonDocument::Indented);
 }
@@ -260,39 +286,240 @@ void printEventsJson(QObject* plugin) {
     out << doc.toJson(QJsonDocument::Indented);
 }
 
-int cmdMetadata(const QString& pluginPath, bool jsonOutput) {
-    QFileInfo fileInfo(pluginPath);
-    QString absolutePath = fileInfo.absoluteFilePath();
-    
-    if (!fileInfo.exists()) {
-        err << "Error: Plugin file not found: " << pluginPath << Qt::endl;
-        return 1;
+// =============================================================================
+// Module directories
+// =============================================================================
+
+QString mainResolutionName(MainResolution state) {
+    switch (state) {
+    case MainResolution::Resolved:       return QStringLiteral("resolved");
+    case MainResolution::NoManifest:     return QStringLiteral("no_manifest");
+    case MainResolution::NotDeclared:    return QStringLiteral("not_declared");
+    case MainResolution::MalformedEntry: return QStringLiteral("malformed_entry");
+    case MainResolution::NoVariantMatch: return QStringLiteral("no_variant_match");
+    case MainResolution::FileMissing:    return QStringLiteral("file_missing");
     }
-    
+    return QStringLiteral("unknown");
+}
+
+QString nameAgreementName(NameAgreement agreement) {
+    switch (agreement) {
+    case NameAgreement::Agree:               return QStringLiteral("agree");
+    case NameAgreement::Disagree:            return QStringLiteral("disagree");
+    case NameAgreement::ManifestNameMissing: return QStringLiteral("manifest_name_missing");
+    case NameAgreement::EmbeddedNameMissing: return QStringLiteral("embedded_name_missing");
+    }
+    return QStringLiteral("unknown");
+}
+
+// The keys manifest.json's `main` offers, so a variant mismatch can show the
+// reader both sides of it. Empty for the plain-string form.
+QStringList declaredMainVariants(const ModuleDirectory& dir) {
+    if (!dir.manifest().isPresent()) {
+        return QStringList();
+    }
+    return dir.manifest().parsed.value(QStringLiteral("main")).toObject().keys();
+}
+
+// Names the actual fault. "not found" for every one of these is useless to
+// whoever hits it: a missing manifest, a manifest with no main, a main naming a
+// file that was never extracted, and a main with no entry for this variant are
+// four different repairs.
+void reportDirectoryProblem(const ModuleDirectory& dir) {
+    const QString manifestPath = QDir(dir.path()).filePath(QStringLiteral("manifest.json"));
+
+    if (dir.directoryState() == FileState::Unreadable) {
+        err << "Error: module directory is not readable: " << dir.path() << Qt::endl;
+        return;
+    }
+
+    switch (dir.manifest().state) {
+    case FileState::Absent:
+        err << "Error: no manifest.json in module directory: " << dir.path() << "\n"
+            << "  A module directory is identified by its manifest. To inspect a bare\n"
+            << "  plugin, pass the plugin file itself." << Qt::endl;
+        return;
+    case FileState::Unreadable:
+        err << "Error: manifest.json could not be read: " << manifestPath << "\n"
+            << "  " << dir.manifest().error << Qt::endl;
+        return;
+    case FileState::Malformed:
+        err << "Error: manifest.json is not valid JSON: " << manifestPath << "\n"
+            << "  " << dir.manifest().error << Qt::endl;
+        return;
+    case FileState::Present:
+        break;
+    }
+
+    switch (dir.main().state) {
+    case MainResolution::NotDeclared:
+        err << "Error: manifest.json declares no \"main\": " << manifestPath << "\n"
+            << "  Nothing in this directory is named as the module's plugin." << Qt::endl;
+        return;
+    case MainResolution::MalformedEntry:
+        err << "Error: manifest.json has an unusable \"main\": " << manifestPath << "\n"
+            << "  " << dir.main().error << Qt::endl;
+        return;
+    case MainResolution::NoVariantMatch:
+        err << "Error: manifest.json declares no main for this variant: " << manifestPath << "\n"
+            << "  main has: " << declaredMainVariants(dir).join(QStringLiteral(", ")) << "\n"
+            << "  tried:    "
+            << (dir.candidateVariants().isEmpty()
+                    ? QStringLiteral("(nothing — no `variant` file here; pass --variant <name>)")
+                    : dir.candidateVariants().join(QStringLiteral(", ")))
+            << Qt::endl;
+        return;
+    case MainResolution::FileMissing:
+        err << "Error: manifest.json names a main that is not in the module directory: "
+            << dir.path() << "\n"
+            << "  main" << (dir.main().variant.isEmpty()
+                                ? QString()
+                                : QStringLiteral("[%1]").arg(dir.main().variant))
+            << " = " << dir.main().declaredPath << "\n"
+            << "  The package was installed for another variant, or extraction was partial."
+            << Qt::endl;
+        return;
+    case MainResolution::NoManifest:
+    case MainResolution::Resolved:
+        break;
+    }
+
+    err << "Error: could not resolve a plugin in module directory: " << dir.path() << Qt::endl;
+}
+
+void printDirectoryHuman(const ModuleDirectory& dir) {
+    const QDir root(dir.path());
+
+    out << "Module Directory:\n"
+        << "=================\n"
+        << "Path:         " << dir.path() << "\n"
+        << "Manifest:     manifest.json (" << dir.manifest().bytes.size() << " bytes)\n"
+        << "Signature:    "
+        << (dir.signature().isPresent()
+                ? QStringLiteral("manifest.sig (%1 bytes)").arg(dir.signature().bytes.size())
+                : QStringLiteral("(none — package is unsigned)"))
+        << "\n"
+        << "Variant:      "
+        << (dir.installedVariant().isEmpty() ? QStringLiteral("(no variant file)")
+                                             : dir.installedVariant())
+        << "\n"
+        << "Main:         " << root.relativeFilePath(dir.main().path);
+    if (!dir.main().variant.isEmpty()) {
+        out << "  [main." << dir.main().variant << "]";
+    }
+    out << "\n"
+        << "Payload:      " << dir.payloadEntries().size() << " file(s)\n";
+    for (const QString& entry : dir.payloadEntries()) {
+        out << "  " << entry << "\n";
+    }
+
+    // The impersonation shape: whoever reaches for lm because a module is
+    // misbehaving should not have to compare these two names by hand.
+    if (dir.compareNames() == NameAgreement::Disagree) {
+        out << "\n"
+            << "WARNING: this directory misrepresents its module.\n"
+            << "  manifest.json name: " << dir.manifestName() << "\n"
+            << "  plugin's own name:  " << dir.embeddedMetadata()->name << "\n";
+    }
+}
+
+// The additive half of the JSON. Emitted only for a directory input, and only
+// under the object-shaped commands — `methods`/`events` print a bare array and
+// turning that into an object is exactly the break other parsers would feel.
+QJsonObject directoryJson(const ModuleDirectory& dir) {
+    QJsonObject obj;
+    obj["path"] = dir.path();
+
+    QJsonObject manifest;
+    manifest["size_bytes"] = static_cast<int>(dir.manifest().bytes.size());
+    // The parsed view, for reading. The signed message is the file's exact
+    // bytes on disk, which no JSON writer round-trips — verify against those.
+    manifest["content"] = dir.manifest().parsed;
+    obj["manifest"] = manifest;
+
+    QJsonObject signature;
+    signature["present"] = dir.signature().isPresent();
+    signature["size_bytes"] = static_cast<int>(dir.signature().bytes.size());
+    obj["signature"] = signature;
+
+    if (!dir.installedVariant().isEmpty())
+        obj["installed_variant"] = dir.installedVariant();
+    obj["candidate_variants"] = QJsonArray::fromStringList(dir.candidateVariants());
+
+    QJsonObject main;
+    // "resolved" today, since lm reports the other states on stderr and exits
+    // before it gets here. Named anyway so the shape survives that changing.
+    main["state"] = mainResolutionName(dir.main().state);
+    main["path"] = dir.main().path;
+    main["declared"] = dir.main().declaredPath;
+    if (!dir.main().variant.isEmpty())
+        main["variant"] = dir.main().variant;
+    obj["main"] = main;
+
+    obj["payload"] = QJsonArray::fromStringList(dir.payloadEntries());
+    obj["name_agreement"] = nameAgreementName(dir.compareNames());
+    return obj;
+}
+
+// What the path on the command line turned out to be. Resolved once, up front,
+// because every command needs the same answer and a directory report must be
+// printed once rather than by each command it passes through.
+struct ResolvedInput {
+    QString pluginPath;                        ///< what to load, either way
+    std::optional<ModuleDirectory> directory;  ///< only when a directory was given
+};
+
+std::optional<ResolvedInput> resolveInput(const QString& path, const QStringList& variants) {
+    const QFileInfo info(path);
+
+    if (!info.exists()) {
+        err << "Error: Plugin file not found: " << path << Qt::endl;
+        return std::nullopt;
+    }
+
+    if (!info.isDir()) {
+        if (!variants.isEmpty()) {
+            err << "Error: --variant selects a main from a module directory's manifest.json; "
+                << path << " is a plugin file" << Qt::endl;
+            return std::nullopt;
+        }
+        // Verbatim, not absolutised: the commands absolutise for themselves and
+        // echo this one back in diagnostics, where it must stay what was typed.
+        return ResolvedInput{path, std::nullopt};
+    }
+
+    ModuleDirectory dir = ModuleDirectory::open(path, variants);
+    if (!dir.main().isResolved()) {
+        reportDirectoryProblem(dir);
+        return std::nullopt;
+    }
+    return ResolvedInput{dir.main().path, std::move(dir)};
+}
+
+// The commands below are only ever reached through resolveInput(), which has
+// already proved the path exists — it is the plugin file the user named, or the
+// main it read out of a manifest — so none of them re-checks for one.
+int cmdMetadata(const QString& pluginPath, bool jsonOutput, const QJsonObject* dirObj) {
+    QString absolutePath = QFileInfo(pluginPath).absoluteFilePath();
+
     auto metadata = LogosModule::extractMetadata(absolutePath);
     if (!metadata) {
         err << "Error: Failed to extract metadata from: " << pluginPath << Qt::endl;
         return 1;
     }
-    
+
     if (jsonOutput) {
-        printMetadataJson(*metadata);
+        printMetadataJson(*metadata, dirObj);
     } else {
         printMetadataHuman(*metadata);
     }
-    
+
     return 0;
 }
 
 int cmdMethods(const QString& pluginPath, bool jsonOutput, bool debugOutput) {
-    QFileInfo fileInfo(pluginPath);
-    QString absolutePath = fileInfo.absoluteFilePath();
-    
-    if (!fileInfo.exists()) {
-        err << "Error: Plugin file not found: " << pluginPath << Qt::endl;
-        return 1;
-    }
-    
+    QString absolutePath = QFileInfo(pluginPath).absoluteFilePath();
+
     QString errorString;
     LogosModule plugin;
     
@@ -346,13 +573,7 @@ int cmdMethods(const QString& pluginPath, bool jsonOutput, bool debugOutput) {
 }
 
 int cmdEvents(const QString& pluginPath, bool jsonOutput, bool debugOutput) {
-    QFileInfo fileInfo(pluginPath);
-    QString absolutePath = fileInfo.absoluteFilePath();
-
-    if (!fileInfo.exists()) {
-        err << "Error: Plugin file not found: " << pluginPath << Qt::endl;
-        return 1;
-    }
+    QString absolutePath = QFileInfo(pluginPath).absoluteFilePath();
 
     QString errorString;
     LogosModule plugin;
@@ -391,15 +612,10 @@ int cmdEvents(const QString& pluginPath, bool jsonOutput, bool debugOutput) {
     return 0;
 }
 
-int cmdInfo(const QString& pluginPath, bool jsonOutput, bool debugOutput) {
-    QFileInfo fileInfo(pluginPath);
-    QString absolutePath = fileInfo.absoluteFilePath();
-    
-    if (!fileInfo.exists()) {
-        err << "Error: Plugin file not found: " << pluginPath << Qt::endl;
-        return 1;
-    }
-    
+int cmdInfo(const QString& pluginPath, bool jsonOutput, bool debugOutput,
+            const QJsonObject* dirObj) {
+    QString absolutePath = QFileInfo(pluginPath).absoluteFilePath();
+
     if (jsonOutput) {
         // For JSON output, combine metadata and methods into a single object
         auto metadata = LogosModule::extractMetadata(absolutePath);
@@ -460,12 +676,15 @@ int cmdInfo(const QString& pluginPath, bool jsonOutput, bool debugOutput) {
         combined["metadata"] = metadataObj;
         combined["methods"] = LogosModule::getMethodsAsJson(plugin.instance());
         combined["events"] = LogosModule::getEventsAsJson(plugin.instance());
+        if (dirObj)
+            combined["module_directory"] = *dirObj;
 
         QJsonDocument doc(combined);
         out << doc.toJson(QJsonDocument::Indented);
     } else {
-        // For human-readable output, print metadata, then methods, then events.
-        int result = cmdMetadata(pluginPath, false);
+        // The directory report, if any, was printed once by main() ahead of
+        // this, so the three sections below stay exactly as a plugin file's.
+        int result = cmdMetadata(pluginPath, false, nullptr);
         if (result != 0) {
             return result;
         }
@@ -516,7 +735,8 @@ int main(int argc, char* argv[]) {
     bool jsonOutput = false;
     bool debugOutput = false;
     QString pluginPath;
-    
+    QStringList variants;
+
     // Check if first arg is a command or a plugin path
     if (firstArg == "metadata" || firstArg == "methods" || firstArg == "events") {
         command = firstArg;
@@ -543,6 +763,12 @@ int main(int argc, char* argv[]) {
             return 0;
         } else if (arg == "--json") {
             jsonOutput = true;
+        } else if (arg == "--variant") {
+            if (i + 1 >= args.size()) {
+                err << "Error: --variant needs a variant name" << Qt::endl;
+                return 1;
+            }
+            variants.append(QString::fromStdString(args[++i]));
         } else if (arg == "--debug") {
             debugOutput = true;
         } else if (arg[0] == '-') {
@@ -561,24 +787,43 @@ int main(int argc, char* argv[]) {
     if (pluginPath.isEmpty()) {
         err << "Error: Missing plugin path" << Qt::endl;
         if (defaultMode) {
-            err << "\nUsage: lm [options] <plugin-path>" << Qt::endl;
+            err << "\nUsage: lm [options] <module-path>" << Qt::endl;
         } else {
-            err << "\nUsage: lm " << QString::fromStdString(command) << " [options] <plugin-path>" << Qt::endl;
+            err << "\nUsage: lm " << QString::fromStdString(command) << " [options] <module-path>" << Qt::endl;
         }
         return 1;
     }
-    
+
     // Set global debug flag
     g_debugMode = debugOutput;
-    
+
+    std::optional<ResolvedInput> input = resolveInput(pluginPath, variants);
+    if (!input) {
+        return 1;
+    }
+
+    // The directory report goes first and only once, whatever command follows.
+    // JSON carries it inside the document instead, where the document is an
+    // object; `methods`/`events` print a bare array and get none.
+    std::optional<QJsonObject> dirObj;
+    if (input->directory) {
+        if (jsonOutput) {
+            dirObj = directoryJson(*input->directory);
+        } else {
+            printDirectoryHuman(*input->directory);
+            out << "\n";
+        }
+    }
+    const QJsonObject* dirObjPtr = dirObj ? &*dirObj : nullptr;
+
     if (defaultMode) {
-        return cmdInfo(pluginPath, jsonOutput, debugOutput);
+        return cmdInfo(input->pluginPath, jsonOutput, debugOutput, dirObjPtr);
     } else if (command == "metadata") {
-        return cmdMetadata(pluginPath, jsonOutput);
+        return cmdMetadata(input->pluginPath, jsonOutput, dirObjPtr);
     } else if (command == "methods") {
-        return cmdMethods(pluginPath, jsonOutput, debugOutput);
+        return cmdMethods(input->pluginPath, jsonOutput, debugOutput);
     } else if (command == "events") {
-        return cmdEvents(pluginPath, jsonOutput, debugOutput);
+        return cmdEvents(input->pluginPath, jsonOutput, debugOutput);
     }
 
     return 0;

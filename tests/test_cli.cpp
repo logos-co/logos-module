@@ -3,7 +3,10 @@
 #include <cstdio>
 #include <string>
 #include <array>
+#include <filesystem>
+#include <fstream>
 #include <memory>
+#include <set>
 #include <vector>
 
 // popen/pclose are spelled with a leading underscore in the Windows CRT, and
@@ -422,4 +425,445 @@ TEST_F(CLIPluginTest, Methods_JsonAllMethodsInvokable) {
     EXPECT_EQ(result.exitCode, 0);
     // All methods should be invokable
     EXPECT_NE(result.output.find("\"isInvokable\": true"), std::string::npos);
+}
+
+// =============================================================================
+// Module Directory Tests
+//
+// `lm` takes an installed module directory wherever it takes a plugin file, and
+// resolves the plugin out of manifest.json. The failure modes carry most of the
+// weight here: one "not found" for all of them tells whoever hits it nothing.
+// =============================================================================
+
+namespace fs = std::filesystem;
+
+class CLIDirectoryTest : public CLITest {
+protected:
+    fs::path dir;
+    std::string examplePlugin;
+
+    void SetUp() override {
+        CLITest::SetUp();
+
+        const auto* info = ::testing::UnitTest::GetInstance()->current_test_info();
+        dir = fs::temp_directory_path()
+              / (std::string("lm_dir_") + info->test_suite_name() + "_" + info->name());
+        std::error_code ec;
+        fs::remove_all(dir, ec);
+        ASSERT_TRUE(fs::create_directories(dir, ec)) << ec.message();
+
+        examplePlugin = findExamplePlugin();
+    }
+
+    void TearDown() override {
+        std::error_code ec;
+        fs::remove_all(dir, ec);
+    }
+
+    // Shares CLIPluginTest's TEST_PLUGIN convention.
+    static std::string findExamplePlugin() {
+        const char* env = std::getenv("TEST_PLUGIN");
+        if (env && std::string(env).length() > 0) {
+            return env;
+        }
+#ifdef __APPLE__
+        const std::string name = "package_manager_plugin.dylib";
+#else
+        const std::string name = "package_manager_plugin.so";
+#endif
+        for (const std::string& prefix : {"tests/examples/", "../tests/examples/",
+                                          "../../tests/examples/", "examples/"}) {
+            if (fs::exists(prefix + name)) return prefix + name;
+        }
+        return std::string();
+    }
+
+    fs::path sub(const std::string& name) {
+        const fs::path path = dir / name;
+        std::error_code ec;
+        fs::create_directories(path, ec);
+        return path;
+    }
+
+    void writeIn(const fs::path& where, const std::string& name, const std::string& content) {
+        std::ofstream file(where / name, std::ios::binary);
+        ASSERT_TRUE(file.is_open()) << (where / name).string();
+        file << content;
+    }
+
+    // A hard failure rather than a skip: the plugin is checked in, and a skip
+    // would render as a pass.
+    void copyPluginInto(const fs::path& where, const std::string& name) {
+        ASSERT_FALSE(examplePlugin.empty()) << "example plugin not found; set TEST_PLUGIN";
+        std::error_code ec;
+        fs::copy_file(examplePlugin, where / name, fs::copy_options::overwrite_existing, ec);
+        ASSERT_FALSE(ec) << ec.message();
+    }
+
+    static std::string quote(const fs::path& path) { return "\"" + path.string() + "\""; }
+
+    // A directory whose manifest names the example plugin under one variant.
+    fs::path goodDirectory(const std::string& name = "good") {
+        const fs::path where = sub(name);
+        copyPluginInto(where, "the_plugin");
+        writeIn(where, "manifest.json",
+                R"({"name":"package_manager","main":{"darwin-arm64":"the_plugin"}})");
+        writeIn(where, "variant", "darwin-arm64");
+        return where;
+    }
+};
+
+TEST_F(CLIDirectoryTest, NoManifest_NamesTheMissingManifest) {
+    copyPluginInto(dir, "the_plugin");
+
+    auto result = runCommand("metadata " + quote(dir));
+
+    EXPECT_NE(result.exitCode, 0);
+    EXPECT_NE(result.output.find("no manifest.json"), std::string::npos) << result.output;
+}
+
+TEST_F(CLIDirectoryTest, MalformedManifest_SaysItIsNotValidJson) {
+    writeIn(dir, "manifest.json", "{\"name\": \"package_manager\", \"main\":\n");
+
+    auto result = runCommand("metadata " + quote(dir));
+
+    EXPECT_NE(result.exitCode, 0);
+    EXPECT_NE(result.output.find("not valid JSON"), std::string::npos) << result.output;
+}
+
+TEST_F(CLIDirectoryTest, NoMain_SaysNothingIsNamedAsThePlugin) {
+    copyPluginInto(dir, "the_plugin");
+    writeIn(dir, "manifest.json", R"({"name":"package_manager","version":"1.0.0"})");
+
+    auto result = runCommand("metadata " + quote(dir));
+
+    EXPECT_NE(result.exitCode, 0);
+    EXPECT_NE(result.output.find("declares no \"main\""), std::string::npos) << result.output;
+}
+
+TEST_F(CLIDirectoryTest, MainNamesAMissingFile_SaysWhichFile) {
+    writeIn(dir, "manifest.json",
+            R"({"name":"package_manager","main":{"darwin-arm64":"the_plugin"}})");
+    writeIn(dir, "variant", "darwin-arm64");
+
+    auto result = runCommand("metadata " + quote(dir));
+
+    EXPECT_NE(result.exitCode, 0);
+    EXPECT_NE(result.output.find("names a main that is not in the module directory"),
+              std::string::npos) << result.output;
+    EXPECT_NE(result.output.find("the_plugin"), std::string::npos) << result.output;
+}
+
+TEST_F(CLIDirectoryTest, NoVariantMatch_ShowsWhatIsOfferedAndWhatWasTried) {
+    copyPluginInto(dir, "the_plugin");
+    writeIn(dir, "manifest.json",
+            R"({"name":"package_manager","main":{"darwin-arm64":"the_plugin"}})");
+    writeIn(dir, "variant", "darwin-x86_64");
+
+    auto result = runCommand("metadata " + quote(dir));
+
+    EXPECT_NE(result.exitCode, 0);
+    EXPECT_NE(result.output.find("declares no main for this variant"), std::string::npos)
+        << result.output;
+    // Both sides of the mismatch, or the reader cannot tell which is wrong.
+    EXPECT_NE(result.output.find("main has: darwin-arm64"), std::string::npos) << result.output;
+    EXPECT_NE(result.output.find("tried:    darwin-x86_64"), std::string::npos) << result.output;
+}
+
+TEST_F(CLIDirectoryTest, NoVariantFileAtAll_PointsAtTheVariantFlag) {
+    copyPluginInto(dir, "the_plugin");
+    writeIn(dir, "manifest.json",
+            R"({"name":"package_manager","main":{"darwin-arm64":"the_plugin"}})");
+
+    auto result = runCommand("metadata " + quote(dir));
+
+    EXPECT_NE(result.exitCode, 0);
+    EXPECT_NE(result.output.find("--variant"), std::string::npos) << result.output;
+}
+
+// The whole point of the failure reporting: four different repairs must not
+// arrive as one message.
+TEST_F(CLIDirectoryTest, TheFourMainFailuresAreFourDifferentMessages) {
+    const fs::path noManifest = sub("no_manifest");
+    copyPluginInto(noManifest, "the_plugin");
+
+    const fs::path noMain = sub("no_main");
+    copyPluginInto(noMain, "the_plugin");
+    writeIn(noMain, "manifest.json", R"({"name":"package_manager"})");
+
+    const fs::path missingFile = sub("missing_file");
+    writeIn(missingFile, "manifest.json",
+            R"({"name":"package_manager","main":{"darwin-arm64":"the_plugin"}})");
+    writeIn(missingFile, "variant", "darwin-arm64");
+
+    const fs::path wrongVariant = sub("wrong_variant");
+    copyPluginInto(wrongVariant, "the_plugin");
+    writeIn(wrongVariant, "manifest.json",
+            R"({"name":"package_manager","main":{"darwin-arm64":"the_plugin"}})");
+    writeIn(wrongVariant, "variant", "linux-amd64");
+
+    std::set<std::string> messages;
+    for (const fs::path& each : {noManifest, noMain, missingFile, wrongVariant}) {
+        auto result = runCommand("metadata " + quote(each));
+        EXPECT_NE(result.exitCode, 0) << each.string();
+
+        // Blank the path out first. It differs per case anyway, so leaving it in
+        // would let four identical complaints pass as four distinct ones.
+        std::string first = result.output.substr(0, result.output.find('\n'));
+        for (size_t at = first.find(each.string()); at != std::string::npos;
+             at = first.find(each.string())) {
+            first.replace(at, each.string().size(), "<dir>");
+        }
+        messages.insert(first);
+    }
+    EXPECT_EQ(messages.size(), 4u) << "four different repairs must not arrive as one message";
+}
+
+TEST_F(CLIDirectoryTest, Metadata_ResolvesTheMainFromAVariantMap) {
+    const fs::path where = goodDirectory();
+
+    auto result = runCommand("metadata " + quote(where));
+
+    EXPECT_EQ(result.exitCode, 0) << result.output;
+    EXPECT_NE(result.output.find("Name:         package_manager"), std::string::npos)
+        << result.output;
+    EXPECT_NE(result.output.find("Main:         the_plugin  [main.darwin-arm64]"),
+              std::string::npos) << result.output;
+}
+
+TEST_F(CLIDirectoryTest, Metadata_ResolvesThePlainStringMainForm) {
+    copyPluginInto(dir, "the_plugin");
+    writeIn(dir, "manifest.json", R"({"name":"package_manager","main":"the_plugin"})");
+
+    auto result = runCommand("metadata " + quote(dir));
+
+    EXPECT_EQ(result.exitCode, 0) << result.output;
+    EXPECT_NE(result.output.find("Name:         package_manager"), std::string::npos)
+        << result.output;
+}
+
+TEST_F(CLIDirectoryTest, Metadata_UnsignedDirectoryIsReportedAsUnsigned) {
+    const fs::path where = goodDirectory();
+
+    auto result = runCommand("metadata " + quote(where));
+
+    EXPECT_EQ(result.exitCode, 0) << result.output;
+    EXPECT_NE(result.output.find("package is unsigned"), std::string::npos) << result.output;
+}
+
+TEST_F(CLIDirectoryTest, Metadata_PresentSignatureIsReportedWithItsSize) {
+    const fs::path where = goodDirectory();
+    writeIn(where, "manifest.sig", "0123456789");
+
+    auto result = runCommand("metadata " + quote(where));
+
+    EXPECT_EQ(result.exitCode, 0) << result.output;
+    EXPECT_NE(result.output.find("manifest.sig (10 bytes)"), std::string::npos) << result.output;
+}
+
+TEST_F(CLIDirectoryTest, Metadata_WarnsWhenTheManifestNameDisagreesWithThePlugin) {
+    copyPluginInto(dir, "the_plugin");
+    writeIn(dir, "manifest.json", R"({"name":"innocuous_module","main":"the_plugin"})");
+
+    auto result = runCommand("metadata " + quote(dir));
+
+    EXPECT_EQ(result.exitCode, 0) << result.output;
+    EXPECT_NE(result.output.find("WARNING"), std::string::npos) << result.output;
+    EXPECT_NE(result.output.find("innocuous_module"), std::string::npos) << result.output;
+    EXPECT_NE(result.output.find("package_manager"), std::string::npos) << result.output;
+}
+
+TEST_F(CLIDirectoryTest, Metadata_AgreeingNamesProduceNoWarning) {
+    const fs::path where = goodDirectory();
+
+    auto result = runCommand("metadata " + quote(where));
+
+    EXPECT_EQ(result.exitCode, 0) << result.output;
+    EXPECT_EQ(result.output.find("WARNING"), std::string::npos) << result.output;
+}
+
+TEST_F(CLIDirectoryTest, Json_MetadataObjectGainsModuleDirectory) {
+    const fs::path where = goodDirectory();
+    writeIn(where, "manifest.sig", "0123456789");
+
+    auto result = runCommand("metadata " + quote(where) + " --json");
+
+    EXPECT_EQ(result.exitCode, 0) << result.output;
+    EXPECT_NE(result.output.find("\"module_directory\""), std::string::npos) << result.output;
+    EXPECT_NE(result.output.find("\"installed_variant\": \"darwin-arm64\""), std::string::npos)
+        << result.output;
+    EXPECT_NE(result.output.find("\"state\": \"resolved\""), std::string::npos) << result.output;
+    EXPECT_NE(result.output.find("\"present\": true"), std::string::npos) << result.output;
+    EXPECT_NE(result.output.find("\"name_agreement\": \"agree\""), std::string::npos)
+        << result.output;
+    // The metadata keys other tools already read are untouched.
+    EXPECT_NE(result.output.find("\"name\": \"package_manager\""), std::string::npos)
+        << result.output;
+}
+
+// Back-compat: a plugin file genuinely has no manifest, so the key is absent
+// rather than empty — a reader cannot mistake one for the other, and no
+// directory report is fabricated around the file's parent directory either.
+TEST_F(CLIPluginTest, MetadataJson_PluginFileHasNoModuleDirectoryKey) {
+    auto result = runCommand("metadata " + testPlugin + " --json");
+
+    EXPECT_EQ(result.exitCode, 0);
+    EXPECT_EQ(result.output.find("module_directory"), std::string::npos) << result.output;
+}
+
+TEST_F(CLIPluginTest, DefaultJson_PluginFileHasNoModuleDirectoryKey) {
+    auto result = runCommand(testPlugin + " --json");
+
+    EXPECT_EQ(result.exitCode, 0);
+    EXPECT_EQ(result.output.find("module_directory"), std::string::npos) << result.output;
+}
+
+TEST_F(CLIPluginTest, DefaultHuman_PluginFileHasNoDirectoryReport) {
+    auto result = runCommand(testPlugin);
+
+    EXPECT_EQ(result.exitCode, 0);
+    EXPECT_EQ(result.output.find("Module Directory:"), std::string::npos) << result.output;
+}
+
+TEST_F(CLIDirectoryTest, Variant_FlagOverridesTheInstalledVariant) {
+    const fs::path where = sub("skewed");
+    copyPluginInto(where, "the_plugin");
+    writeIn(where, "manifest.json",
+            R"({"name":"package_manager","main":{"darwin-arm64":"the_plugin"}})");
+    // The live bundler/lgpm spelling skew: the file says one thing, the
+    // manifest keys another, and the caller supplies the reconciliation.
+    writeIn(where, "variant", "darwin-x86_64");
+
+    auto result = runCommand("metadata " + quote(where) + " --variant darwin-arm64");
+
+    EXPECT_EQ(result.exitCode, 0) << result.output;
+    EXPECT_NE(result.output.find("Main:         the_plugin  [main.darwin-arm64]"),
+              std::string::npos) << result.output;
+    // The installed variant is still reported as what it is, not as the override.
+    EXPECT_NE(result.output.find("Variant:      darwin-x86_64"), std::string::npos)
+        << result.output;
+}
+
+TEST_F(CLIDirectoryTest, Variant_FlagIsRefusedOnAPluginFile) {
+    copyPluginInto(dir, "the_plugin");
+
+    auto result = runCommand("metadata " + quote(dir / "the_plugin") + " --variant darwin-arm64");
+
+    EXPECT_NE(result.exitCode, 0);
+    EXPECT_NE(result.output.find("is a plugin file"), std::string::npos) << result.output;
+}
+
+TEST_F(CLIDirectoryTest, Variant_FlagNeedsAName) {
+    auto result = runCommand("metadata " + quote(dir) + " --variant");
+
+    EXPECT_NE(result.exitCode, 0);
+    EXPECT_NE(result.output.find("--variant needs a variant name"), std::string::npos)
+        << result.output;
+}
+
+TEST_F(CLITest, Help_MentionsDirectoriesAndTheVariantFlag) {
+    auto result = runCommand("--help");
+
+    EXPECT_EQ(result.exitCode, 0);
+    EXPECT_NE(result.output.find("module directory"), std::string::npos) << result.output;
+    EXPECT_NE(result.output.find("--variant"), std::string::npos) << result.output;
+}
+
+// -----------------------------------------------------------------------------
+// Plugin-file back-compat. Other tools parse lm's output, so a path must come
+// back spelled the way it was typed. Resolving a directory to its main is a new
+// chance to absolutise the plugin-file path too, and nothing else notices.
+// -----------------------------------------------------------------------------
+
+class CLIPathEchoTest : public CLIDirectoryTest {
+protected:
+    void SetUp() override {
+        CLIDirectoryTest::SetUp();
+        if (lmBinary.empty()) return;
+        // Run lm from inside the scratch dir so the argument can be a bare
+        // relative name; an absolutised echo is then unmistakable.
+        lmBinary = "cd " + quote(dir) + " && " + fs::absolute(lmBinary).string();
+    }
+
+    // Exists, but is not a loadable plugin — the only way to reach the
+    // "Failed to extract metadata" path on a file the user really named.
+    void writeNonPlugin() { writeIn(dir, "notaplugin.txt", "not a plugin, just text\n"); }
+};
+
+TEST_F(CLIPathEchoTest, Metadata_EchoesTheRelativePathAsTyped) {
+    writeNonPlugin();
+
+    auto result = runCommand("metadata notaplugin.txt");
+
+    EXPECT_NE(result.exitCode, 0);
+    EXPECT_NE(result.output.find("Failed to extract metadata from: notaplugin.txt\n"),
+              std::string::npos)
+        << result.output;
+}
+
+TEST_F(CLIPathEchoTest, DefaultJson_EchoesTheRelativePathAsTyped) {
+    writeNonPlugin();
+
+    auto result = runCommand("notaplugin.txt --json");
+
+    EXPECT_NE(result.exitCode, 0);
+    EXPECT_NE(result.output.find("Failed to extract metadata from: notaplugin.txt\n"),
+              std::string::npos)
+        << result.output;
+}
+
+// -----------------------------------------------------------------------------
+// Directory tests that need the plugin to actually load. Named to match the
+// nix check's `--exclude-regex CLIPluginTest`: the checked-in example plugin
+// hardcodes /nix/store paths that are not in the sandbox's closure.
+// -----------------------------------------------------------------------------
+
+class CLIPluginTestDirectory : public CLIDirectoryTest {};
+
+TEST_F(CLIPluginTestDirectory, Methods_ResolvesTheMainOutOfTheDirectory) {
+    const fs::path where = goodDirectory();
+
+    auto result = runCommand("methods " + quote(where));
+
+    EXPECT_EQ(result.exitCode, 0) << result.output;
+    EXPECT_NE(result.output.find("installPlugin"), std::string::npos) << result.output;
+}
+
+// The JSON shape guarantee: `methods`/`events` print a bare array, and turning
+// that into an object to carry the directory report is exactly the break other
+// parsers would feel. They stay an array; `lm <dir> --json` carries the report.
+TEST_F(CLIPluginTestDirectory, MethodsJson_StaysABareArray) {
+    const fs::path where = goodDirectory();
+
+    auto result = runCommand("methods " + quote(where) + " --json");
+
+    EXPECT_EQ(result.exitCode, 0) << result.output;
+    EXPECT_EQ(result.output.find_first_not_of(" \t\r\n"), result.output.find('['))
+        << result.output;
+    EXPECT_EQ(result.output.find("module_directory"), std::string::npos) << result.output;
+}
+
+TEST_F(CLIPluginTestDirectory, DefaultJson_KeepsItsSectionsAndAddsModuleDirectory) {
+    const fs::path where = goodDirectory();
+
+    auto result = runCommand(quote(where) + " --json");
+
+    EXPECT_EQ(result.exitCode, 0) << result.output;
+    for (const char* key : {"\"metadata\"", "\"methods\"", "\"events\"", "\"module_directory\""}) {
+        EXPECT_NE(result.output.find(key), std::string::npos) << key << "\n" << result.output;
+    }
+}
+
+TEST_F(CLIPluginTestDirectory, Default_HumanPrintsTheDirectoryReportExactlyOnce) {
+    const fs::path where = goodDirectory();
+
+    auto result = runCommand(quote(where));
+
+    EXPECT_EQ(result.exitCode, 0) << result.output;
+    size_t count = 0;
+    for (size_t at = result.output.find("Module Directory:"); at != std::string::npos;
+         at = result.output.find("Module Directory:", at + 1)) {
+        ++count;
+    }
+    EXPECT_EQ(count, 1u) << result.output;
 }
