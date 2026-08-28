@@ -11,12 +11,14 @@ find_package(Qt6 REQUIRED COMPONENTS Core)
 # Define source files
 set(MODULE_LIB_SOURCES
     src/module_metadata.cpp
+    src/module_directory.cpp
     src/logos_module.cpp
     src/instance_persistence.cpp
 )
 
 set(MODULE_LIB_HEADERS
     src/module_metadata.h
+    src/module_directory.h
     src/logos_module.h
     src/logos_provider_plugin.h
     src/module_lib.h
