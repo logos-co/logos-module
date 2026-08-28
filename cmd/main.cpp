@@ -76,11 +76,13 @@ void printUsage() {
         << "  metadata    Show plugin metadata (name, version, description, etc.)\n"
         << "  methods     Show plugin methods and signatures\n"
         << "  events      Show plugin events and signatures\n"
+        << "  verify      Check an installed module directory against its manifest\n"
         << "\n"
         << "Options:\n"
         << "  --json      Output in JSON format\n"
         << "  --variant <name>  Variant to resolve manifest.json's main with\n"
         << "              (repeatable, directories only; defaults to the installed one)\n"
+        << "  --did <did:jwk:...>  Whose signature manifest.sig must carry (verify only)\n"
         << "  --debug     Show debug output from plugin loading\n"
         << "  --help, -h  Show help information\n"
         << "  --version, -v  Show version information\n"
@@ -94,7 +96,9 @@ void printUsage() {
         << "  lm methods /path/to/plugin.so\n"
         << "  lm metadata /path/to/plugin.so --json\n"
         << "  lm methods /path/to/plugin.so --json --debug\n"
-        << "  lm metadata /path/to/modules/my_module --variant linux-amd64\n";
+        << "  lm metadata /path/to/modules/my_module --variant linux-amd64\n"
+        << "  lm verify /path/to/modules/my_module\n"
+        << "  lm verify /path/to/modules/my_module --did did:jwk:eyJrdHkiOi...\n";
 }
 
 void printCommandHelp(const QString& command) {
@@ -124,6 +128,26 @@ void printCommandHelp(const QString& command) {
             << "  --json   Output in JSON format\n"
             << "  --variant <name>  Variant to resolve manifest.json's main with\n"
             << "  --debug  Show debug output from plugin loading\n";
+    } else if (command == "verify") {
+        out << "Usage: lm verify [options] <module-directory>\n"
+            << "\n"
+            << "Run every check that survives installation against the directory:\n"
+            << "the manifest's own field rules, whether the installed files still\n"
+            << "hash to what the manifest covers, and whether main, view and the\n"
+            << "icon resolve. The rules are logos-package's, the same ones\n"
+            << "`lgx verify` applies to the .lgx the directory came out of.\n"
+            << "\n"
+            << "Signature checking happens only when you say whose signature it\n"
+            << "must be. The DID inside manifest.sig is never used as the key:\n"
+            << "whoever replaces a signature replaces that DID beside it.\n"
+            << "\n"
+            << "Exits non-zero when a check fails, or when --did was given and\n"
+            << "the signature is not that DID's.\n"
+            << "\n"
+            << "Options:\n"
+            << "  --json   Output in JSON format\n"
+            << "  --variant <name>  Variant to check, when there is no `variant` file\n"
+            << "  --did <did:jwk:...>  DID whose key must have signed manifest.json\n";
     } else if (command == "events") {
         out << "Usage: lm events [options] <module-path>\n"
             << "\n"
@@ -331,6 +355,29 @@ QString pluginExpectationName(PluginExpectation expectation) {
     return QStringLiteral("unknown");
 }
 
+QString integrityStateName(IntegrityState state) {
+    switch (state) {
+    case IntegrityState::Ok:         return QStringLiteral("ok");
+    case IntegrityState::Mismatch:   return QStringLiteral("mismatch");
+    case IntegrityState::NoHash:     return QStringLiteral("no_hash");
+    case IntegrityState::Unreadable: return QStringLiteral("unreadable");
+    case IntegrityState::BadInput:   return QStringLiteral("bad_input");
+    }
+    return QStringLiteral("unknown");
+}
+
+QString signatureCheckName(SignatureCheck check) {
+    switch (check) {
+    case SignatureCheck::Ok:        return QStringLiteral("ok");
+    case SignatureCheck::Mismatch:  return QStringLiteral("mismatch");
+    case SignatureCheck::Unusable:  return QStringLiteral("unusable");
+    case SignatureCheck::BadDid:    return QStringLiteral("bad_did");
+    case SignatureCheck::Unsigned:  return QStringLiteral("unsigned");
+    case SignatureCheck::NoMessage: return QStringLiteral("no_message");
+    }
+    return QStringLiteral("unknown");
+}
+
 // One line each, so a reader never has to look a state up. Every one names the
 // repair, because "invalid" told nobody anything they could act on.
 QString assetDescription(const AssetFile& asset) {
@@ -454,7 +501,11 @@ void printDirectoryHuman(const ModuleDirectory& dir) {
         << "Manifest:     manifest.json (" << dir.manifest().bytes.size() << " bytes)\n"
         << "Signature:    "
         << (dir.signature().isPresent()
-                ? QStringLiteral("manifest.sig (%1 bytes)").arg(dir.signature().bytes.size())
+                ? QStringLiteral("manifest.sig (%1 bytes), claims %2")
+                      .arg(dir.signature().bytes.size())
+                      .arg(dir.claimedSignerDid().isEmpty()
+                               ? QStringLiteral("no DID")
+                               : dir.claimedSignerDid())
                 : QStringLiteral("(none — package is unsigned)"))
         << "\n"
         << "Variant:      "
@@ -526,6 +577,8 @@ QJsonObject directoryJson(const ModuleDirectory& dir) {
     QJsonObject signature;
     signature["present"] = dir.signature().isPresent();
     signature["size_bytes"] = static_cast<int>(dir.signature().bytes.size());
+    // Self-asserted, and named so. Nothing has been checked against it.
+    signature["claimed_did"] = dir.claimedSignerDid();
     obj["signature"] = signature;
 
     if (!dir.installedVariant().isEmpty())
@@ -609,6 +662,139 @@ int cmdWithoutPlugin(const QString& command, bool jsonOutput, const QJsonObject*
         obj["module_directory"] = *dirObj;
     out << QJsonDocument(obj).toJson(QJsonDocument::Indented);
     return 0;
+}
+
+// =============================================================================
+// Verification
+// =============================================================================
+
+QString integrityLine(const InstalledChecks& checks) {
+    switch (checks.integrity) {
+    case IntegrityState::Ok:
+        return QStringLiteral("ok — the installed files hash to hashes[\"variants/%1\"]")
+            .arg(checks.variant);
+    case IntegrityState::Mismatch:
+        return QStringLiteral("MISMATCH — %1").arg(checks.integrityDetail);
+    case IntegrityState::NoHash:
+        return QStringLiteral("not proved — %1").arg(checks.integrityDetail);
+    case IntegrityState::Unreadable:
+        return QStringLiteral("could not run — %1").arg(checks.integrityDetail);
+    case IntegrityState::BadInput:
+        return QStringLiteral("not checked — %1").arg(checks.integrityDetail);
+    }
+    return checks.integrityDetail;
+}
+
+QString signatureLine(const ModuleDirectory& dir, const QString& expectedDid,
+                      const std::optional<SignatureCheck>& check) {
+    const QString claimed = dir.claimedSignerDid();
+    if (!check) {
+        if (!dir.signature().isPresent()) {
+            return QStringLiteral("not checked — this package is unsigned");
+        }
+        // The claimed DID is shown so a human can decide what to pin. It is
+        // never what gets checked: see ModuleDirectory::checkSignature().
+        return QStringLiteral("not checked — pass --did to check it "
+                              "(manifest.sig claims %1)")
+            .arg(claimed.isEmpty() ? QStringLiteral("no DID") : claimed);
+    }
+    switch (*check) {
+    case SignatureCheck::Ok:
+        return QStringLiteral("ok — %1 signed this manifest").arg(expectedDid);
+    case SignatureCheck::Mismatch:
+        return QStringLiteral("MISMATCH — %1 did not sign these bytes "
+                              "(manifest.sig claims %2)")
+            .arg(expectedDid, claimed.isEmpty() ? QStringLiteral("no DID") : claimed);
+    case SignatureCheck::Unusable:
+        return QStringLiteral("unusable — manifest.sig is not a usable Ed25519 "
+                              "signature document");
+    case SignatureCheck::BadDid:
+        return QStringLiteral("bad --did — '%1' is not a did:jwk carrying an "
+                              "Ed25519 key").arg(expectedDid);
+    case SignatureCheck::Unsigned:
+        return QStringLiteral("unsigned — there is no manifest.sig here to check");
+    case SignatureCheck::NoMessage:
+        return QStringLiteral("no message — there is no readable manifest.json "
+                              "to have been signed");
+    }
+    return QString();
+}
+
+// Reports; the exit status is lm's own call, made by the caller below.
+void printVerifyHuman(const ModuleDirectory& dir, const InstalledChecks& checks,
+                      const QString& expectedDid,
+                      const std::optional<SignatureCheck>& signature) {
+    out << "Verification:\n"
+        << "=============\n"
+        << "Path:       " << dir.path() << "\n"
+        << "Variant:    "
+        << (checks.variant.isEmpty() ? QStringLiteral("(none)") : checks.variant) << "\n"
+        << "Integrity:  " << integrityLine(checks) << "\n"
+        << "Signature:  " << signatureLine(dir, expectedDid, signature) << "\n";
+
+    if (checks.errors.isEmpty()) {
+        out << "Findings:   none\n";
+    } else {
+        out << "Findings:   " << checks.errors.size() << "\n";
+        for (const QString& e : checks.errors) {
+            out << "  - " << e << "\n";
+        }
+    }
+    for (const QString& w : checks.warnings) {
+        out << "  ! " << w << "\n";
+    }
+}
+
+void printVerifyJson(const ModuleDirectory& dir, const InstalledChecks& checks,
+                     const QString& expectedDid,
+                     const std::optional<SignatureCheck>& signature) {
+    QJsonObject obj;
+    obj["path"] = dir.path();
+    obj["ran"] = checks.ran;
+    obj["valid"] = checks.valid;
+    obj["variant"] = checks.variant;
+    obj["integrity"] = integrityStateName(checks.integrity);
+    if (!checks.integrityDetail.isEmpty())
+        obj["integrity_detail"] = checks.integrityDetail;
+    obj["errors"] = QJsonArray::fromStringList(checks.errors);
+    obj["warnings"] = QJsonArray::fromStringList(checks.warnings);
+
+    QJsonObject sig;
+    sig["state"] = signature ? signatureCheckName(*signature)
+                             : QStringLiteral("not_checked");
+    sig["present"] = dir.signature().isPresent();
+    // Labelled `claimed_did`, never `signer`: nothing has been proved about it.
+    sig["claimed_did"] = dir.claimedSignerDid();
+    if (!expectedDid.isEmpty())
+        sig["expected_did"] = expectedDid;
+    obj["signature"] = sig;
+
+    out << QJsonDocument(obj).toJson(QJsonDocument::Indented);
+}
+
+int cmdVerify(const ModuleDirectory& dir, const QString& expectedDid, bool jsonOutput) {
+    const InstalledChecks checks = dir.checkInstalled();
+
+    // No DID means no signature question was asked, so none is answered. There
+    // is deliberately no way to ask "is the signature good?" without naming
+    // whose it must be.
+    std::optional<SignatureCheck> signature;
+    if (!expectedDid.isEmpty()) {
+        signature = dir.checkSignature(expectedDid);
+    }
+
+    if (jsonOutput) {
+        printVerifyJson(dir, checks, expectedDid, signature);
+    } else {
+        printVerifyHuman(dir, checks, expectedDid, signature);
+    }
+
+    const bool signatureFailed = signature && *signature != SignatureCheck::Ok;
+    const bool failed = !checks.ran || !checks.valid || signatureFailed;
+    if (!jsonOutput) {
+        out << "\nRESULT: " << (failed ? "FAIL" : "pass") << "\n";
+    }
+    return failed ? 1 : 0;
 }
 
 // The commands below are only ever reached through resolveInput(), which has
@@ -851,9 +1037,11 @@ int main(int argc, char* argv[]) {
     bool debugOutput = false;
     QString pluginPath;
     QStringList variants;
+    QString expectedDid;
 
     // Check if first arg is a command or a plugin path
-    if (firstArg == "metadata" || firstArg == "methods" || firstArg == "events") {
+    if (firstArg == "metadata" || firstArg == "methods" || firstArg == "events" ||
+        firstArg == "verify") {
         command = firstArg;
     } else if (firstArg[0] != '-') {
         // First arg is not a command and not an option, treat as plugin path
@@ -884,6 +1072,12 @@ int main(int argc, char* argv[]) {
                 return 1;
             }
             variants.append(QString::fromStdString(args[++i]));
+        } else if (arg == "--did") {
+            if (i + 1 >= args.size()) {
+                err << "Error: --did needs a did:jwk value" << Qt::endl;
+                return 1;
+            }
+            expectedDid = QString::fromStdString(args[++i]);
         } else if (arg == "--debug") {
             debugOutput = true;
         } else if (arg[0] == '-') {
@@ -911,6 +1105,32 @@ int main(int argc, char* argv[]) {
 
     // Set global debug flag
     g_debugMode = debugOutput;
+
+    if (!expectedDid.isEmpty() && command != "verify") {
+        err << "Error: --did names whose signature to check, which only "
+            << "`lm verify` does" << Qt::endl;
+        return 1;
+    }
+
+    // verify does not go through resolveInput(): it is the command for a
+    // directory that may be broken, so bailing out on a broken one would
+    // suppress exactly the report it exists to print.
+    if (command == "verify") {
+        const QFileInfo info(pluginPath);
+        if (!info.exists()) {
+            err << "Error: module directory not found: " << pluginPath << Qt::endl;
+            return 1;
+        }
+        if (!info.isDir()) {
+            err << "Error: verify takes an installed module directory; "
+                << pluginPath << " is a file\n"
+                << "  The checks are over manifest.json and the files it covers, "
+                << "and a bare plugin has neither." << Qt::endl;
+            return 1;
+        }
+        return cmdVerify(ModuleDirectory::open(pluginPath, variants), expectedDid,
+                         jsonOutput);
+    }
 
     std::optional<ResolvedInput> input = resolveInput(pluginPath, variants);
     if (!input) {

@@ -1,5 +1,9 @@
 # Common build configuration shared across all packages
-{ pkgs }:
+#
+# logosPackage is the lgx shared library + headers. Required: the
+# installed-directory checks are logos-package's, and a build that could not
+# reach them would have to answer "unknown" to every one of them.
+{ pkgs, logosPackage }:
 
 {
   pname = "logos-module";
@@ -16,11 +20,13 @@
   buildInputs = [ 
     pkgs.qt6.qtbase
     pkgs.gtest
+    logosPackage
   ];
   
   # Common CMake flags
   cmakeFlags = (pkgs.logosQtCrossCmakeFlags or [ ]) ++ [ 
     "-GNinja"
+    "-DLOGOS_PACKAGE_ROOT=${logosPackage}"
   ];
   
   # Metadata

@@ -871,6 +871,109 @@ TEST_F(CLIPluginTestDirectory, Default_HumanPrintsTheDirectoryReportExactlyOnce)
 }
 
 // =============================================================================
+// `lm verify`: the library reports, the CLI decides the exit status
+// =============================================================================
+
+class CLIVerifyTest : public CLITest {
+protected:
+    std::string examples() const { return testExamplesDir(); }
+    std::string signedInstall() const { return examples() + "/installed_signed"; }
+    std::string qmlOnlyInstall() const { return examples() + "/installed_qml_only"; }
+
+    // The DID whose key signed installed_signed/manifest.json, and an
+    // unrelated but equally well-formed one.
+    static constexpr const char* kSignerDid =
+        "did:jwk:eyJjcnYiOiJFZDI1NTE5Iiwia3R5IjoiT0tQIiwieCI6IkxQMjNNbFI5eWQ4d2VUTk9B"
+        "OElEeVNUZ2REdm41cGIxaTMteE5YTm9fWjgifQ";
+    static constexpr const char* kOtherDid =
+        "did:jwk:eyJjcnYiOiJFZDI1NTE5Iiwia3R5IjoiT0tQIiwieCI6ImpBazdZc3BXUnk1ckNQcFct"
+        "SnItRGlRWHNGOUhJaDhKUVlIVGVZWE9CZ2MifQ";
+};
+
+TEST_F(CLIVerifyTest, AnUntouchedInstallPassesAndExitsZero) {
+    auto result = runCommand("verify " + signedInstall());
+
+    EXPECT_EQ(result.exitCode, 0) << result.output;
+    EXPECT_NE(result.output.find("RESULT: pass"), std::string::npos) << result.output;
+    EXPECT_NE(result.output.find("Integrity:  ok"), std::string::npos) << result.output;
+}
+
+TEST_F(CLIVerifyTest, AUiPluginGoesThroughTheSameCommand) {
+    auto result = runCommand("verify " + qmlOnlyInstall());
+
+    EXPECT_EQ(result.exitCode, 0) << result.output;
+    EXPECT_NE(result.output.find("RESULT: pass"), std::string::npos) << result.output;
+}
+
+TEST_F(CLIVerifyTest, ThePinnedDidIsReportedAsChecked) {
+    auto result = runCommand("verify " + signedInstall() + " --did " + kSignerDid);
+
+    EXPECT_EQ(result.exitCode, 0) << result.output;
+    EXPECT_NE(result.output.find("Signature:  ok"), std::string::npos) << result.output;
+}
+
+TEST_F(CLIVerifyTest, AWrongDidFailsTheRunEvenThoughEveryOtherCheckPasses) {
+    auto result = runCommand("verify " + signedInstall() + " --did " + kOtherDid);
+
+    EXPECT_EQ(result.exitCode, 1) << result.output;
+    EXPECT_NE(result.output.find("Signature:  MISMATCH"), std::string::npos) << result.output;
+    EXPECT_NE(result.output.find("Integrity:  ok"), std::string::npos) << result.output;
+}
+
+TEST_F(CLIVerifyTest, AnUnparseableDidIsReportedAsTheCallersError) {
+    auto result = runCommand("verify " + signedInstall() + " --did did:web:example.com");
+
+    EXPECT_EQ(result.exitCode, 1) << result.output;
+    EXPECT_NE(result.output.find("bad --did"), std::string::npos) << result.output;
+}
+
+TEST_F(CLIVerifyTest, WithoutADidNoSignatureQuestionIsAnswered) {
+    auto result = runCommand("verify " + signedInstall());
+
+    EXPECT_EQ(result.exitCode, 0) << result.output;
+    EXPECT_NE(result.output.find("Signature:  not checked"), std::string::npos)
+        << result.output;
+}
+
+TEST_F(CLIVerifyTest, ADirectoryThatCannotBeCheckedExitsNonZero) {
+    const std::filesystem::path dir =
+        std::filesystem::temp_directory_path() / "lm_verify_empty_dir";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+
+    auto result = runCommand("verify " + dir.string());
+
+    EXPECT_EQ(result.exitCode, 1) << result.output;
+    EXPECT_NE(result.output.find("no manifest.json"), std::string::npos) << result.output;
+    std::filesystem::remove_all(dir);
+}
+
+TEST_F(CLIVerifyTest, VerifyRefusesABarePluginFile) {
+    auto result = runCommand("verify " + signedInstall() + "/signed_module_plugin.dylib");
+
+    EXPECT_EQ(result.exitCode, 1) << result.output;
+    EXPECT_NE(result.output.find("installed module directory"), std::string::npos)
+        << result.output;
+}
+
+TEST_F(CLIVerifyTest, DidOnlyMeansSomethingToVerify) {
+    auto result = runCommand("metadata " + signedInstall() + " --did " + kSignerDid);
+
+    EXPECT_EQ(result.exitCode, 1) << result.output;
+    EXPECT_NE(result.output.find("--did"), std::string::npos) << result.output;
+}
+
+TEST_F(CLIVerifyTest, TheJsonReportNamesEveryVerdict) {
+    auto result = runCommand("verify " + signedInstall() + " --json --did " + kSignerDid);
+
+    EXPECT_EQ(result.exitCode, 0) << result.output;
+    EXPECT_NE(result.output.find("\"integrity\": \"ok\""), std::string::npos) << result.output;
+    EXPECT_NE(result.output.find("\"state\": \"ok\""), std::string::npos) << result.output;
+    EXPECT_NE(result.output.find("\"claimed_did\""), std::string::npos) << result.output;
+    EXPECT_NE(result.output.find("\"valid\": true"), std::string::npos) << result.output;
+}
+
+// =============================================================================
 // A ui_qml package with no plugin is a complete package
 // =============================================================================
 

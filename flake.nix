@@ -4,9 +4,15 @@
   inputs = {
     logos-nix.url = "github:logos-co/logos-nix";
     nixpkgs.follows = "logos-nix/nixpkgs";
+
+    # The installed-package checks are logos-package's, reached through its C
+    # ABI. The direction is forced: logos-package is Qt-free and this library
+    # is not, so only this edge can exist.
+    logos-package.url = "github:logos-co/logos-package";
+    logos-package.inputs.logos-nix.follows = "logos-nix";
   };
 
-  outputs = { self, nixpkgs, logos-nix }:
+  outputs = { self, nixpkgs, logos-nix, logos-package }:
     let
       systems = [ "aarch64-darwin" "x86_64-darwin" "aarch64-linux" "x86_64-linux" ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f {
@@ -15,10 +21,13 @@
     in
     {
       # "x86_64-windows" pseudo-system; realises on x86_64-linux.
-      packages = logos-nix.lib.forAllTargets ({ pkgs, ... }: 
+      packages = logos-nix.lib.forAllTargets ({ pkgs, system, ... }: 
         let
           # Common configuration
-          common = import ./nix/default.nix { inherit pkgs; };
+          common = import ./nix/default.nix {
+            inherit pkgs;
+            logosPackage = logos-package.packages.${system}.lib;
+          };
           src = ./.;
           
           # Binary package (lm CLI)
@@ -58,7 +67,10 @@
 
       checks = forAllSystems ({ pkgs }:
         let
-          common = import ./nix/default.nix { inherit pkgs; };
+          common = import ./nix/default.nix {
+            inherit pkgs;
+            logosPackage = logos-package.packages.${pkgs.system}.lib;
+          };
           src = ./.;
         in {
           tests = import ./nix/all.nix { inherit pkgs common src; skipPluginTests = true; };
@@ -75,8 +87,11 @@
           buildInputs = [
             pkgs.qt6.qtbase
             pkgs.gtest
+            logos-package.packages.${pkgs.system}.lib
           ];
-          
+
+          LOGOS_PACKAGE_ROOT = "${logos-package.packages.${pkgs.system}.lib}";
+
           shellHook = ''
             echo "Logos Module development environment"
             echo "Build with tests: cmake -B build -DLOGOS_MODULE_BUILD_TESTS=ON && cmake --build build"

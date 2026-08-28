@@ -3,6 +3,7 @@
 add_executable(logos_module_tests
     test_metadata.cpp
     test_module_directory.cpp
+    test_installed_checks.cpp
     test_introspection.cpp
     test_cli.cpp
     test_instance_persistence.cpp

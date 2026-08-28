@@ -386,6 +386,16 @@ PluginExpectation ModuleDirectory::computePluginExpectation() const
     return PluginExpectation::Missing;
 }
 
+QString ModuleDirectory::checkedVariant() const
+{
+    if (!m_installedVariant.isEmpty()) {
+        return m_installedVariant;
+    }
+    // No `variant` sidecar: the key that resolved `main` is the only other
+    // statement this directory makes about which variant is on disk.
+    return m_main.variant;
+}
+
 NameAgreement ModuleDirectory::compareNames() const
 {
     const QString declared = manifestName();

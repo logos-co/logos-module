@@ -135,6 +135,53 @@ enum class PluginExpectation {
 };
 
 /**
+ * @brief Whether the installed files are still the ones the manifest covers.
+ *
+ * lgx_integrity_t verbatim: only Ok is a pass, and the three non-Mismatch
+ * values are each "not a verdict" for a different reason.
+ */
+enum class IntegrityState {
+    Ok,          ///< the tree hashes to the manifest's value for this variant
+    Mismatch,    ///< it does not: content added, removed or altered
+    NoHash,      ///< no hash declared for this variant; nothing proved either way
+    Unreadable,  ///< the check could not run
+    BadInput,    ///< there was no usable variant or manifest to check against
+};
+
+/**
+ * @brief What logos-package makes of this installed directory.
+ *
+ * Findings, not a policy: `valid` is the sum of the checks that ran, and every
+ * caller decides for itself what to refuse. `ran` is false when this library
+ * could not get as far as calling logos-package — a missing manifest, no
+ * variant to check — and `errors` then says which.
+ */
+struct InstalledChecks {
+    bool ran = false;
+    bool valid = false;
+    IntegrityState integrity = IntegrityState::BadInput;
+    QString integrityDetail;  ///< human-readable reason when integrity is not Ok
+    QString variant;          ///< the variant the checks ran against
+    QStringList errors;
+    QStringList warnings;
+};
+
+/**
+ * @brief Whether a DID THE CALLER NAMED signed this directory's manifest.
+ */
+enum class SignatureCheck {
+    Ok,        ///< the pinned DID's key produced manifest.sig over manifest().bytes
+    Mismatch,  ///< a usable signature the pinned DID did not produce
+    Unusable,  ///< manifest.sig is present but unparseable or not an Ed25519 signature
+    BadDid,    ///< the CALLER's DID is not a did:jwk carrying an Ed25519 key
+    Unsigned,  ///< there is no manifest.sig here
+    /// There is no readable manifest.json — no signed message to check
+    /// anything against. Distinct from Mismatch, which would otherwise be the
+    /// answer, and would be a definitive statement about bytes that do not exist.
+    NoMessage,
+};
+
+/**
  * @brief Whether manifest.json's `name` and the plugin's embedded `name` agree.
  *
  * Reported, never enforced. Refusing a mismatch is the host's policy call
@@ -292,6 +339,48 @@ public:
     /// manifest is the side a host trusts.
     NameAgreement compareNames() const;
 
+    /**
+     * @brief The variant the installed-directory checks run against.
+     *
+     * The `variant` sidecar when there is one — it records exactly what was
+     * extracted here — otherwise the candidate that resolved `main`. Empty
+     * when neither says, which is the one case checkInstalled() cannot run.
+     */
+    QString checkedVariant() const;
+
+    /**
+     * @brief Run every check that survives installation, through logos-package.
+     *
+     * The manifest's own field rules, the integrity of the tree against
+     * hashes["variants/<variant>"], main/view resolution and the icon
+     * contract. All of it is logos-package's code, reached through its C ABI:
+     * this library owns the layout, that one owns the format.
+     *
+     * Reports; never refuses. Not cached — it hashes every file in the
+     * directory, and a caller that wants one answer should keep it.
+     */
+    InstalledChecks checkInstalled() const;
+
+    /**
+     * @brief Check manifest.sig against a DID the CALLER pins.
+     *
+     * `expectedDid` is required and there is deliberately no overload without
+     * one. Taking the DID out of manifest.sig and verifying with that same
+     * document's key proves only that the document is internally consistent:
+     * whoever replaces the signature replaces the DID beside it. A pin — or a
+     * DID the caller looked up in its own keyring — is the only input that
+     * makes the answer mean anything.
+     */
+    SignatureCheck checkSignature(const QString& expectedDid) const;
+
+    /**
+     * @brief The DID manifest.sig CLAIMS to have been signed by.
+     *
+     * Self-asserted, and never used as a key. It exists so a human can see
+     * what to pin; passing it straight back into checkSignature() proves
+     * nothing at all.
+     */
+    QString claimedSignerDid() const;
 
 private:
     QString m_path;

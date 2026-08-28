@@ -723,3 +723,40 @@ TEST_F(UiPluginDirectoryTest, AQmlOnlyPluginHasNoNameToDisagreeWith) {
     EXPECT_FALSE(dir.embeddedMetadata().has_value());
 }
 
+// =============================================================================
+// checkedVariant(): which variant the installed-directory checks run against
+// =============================================================================
+
+TEST_F(UiPluginDirectoryTest, TheVariantFileOutranksTheVariantThatResolvedMain) {
+    // The two can disagree when the caller supplies candidates. The sidecar
+    // wins: it records what was physically extracted here, and the hashes are
+    // over those files.
+    makeModuleDir();
+    writeFile("manifest.json", kManifestWithMap);
+    writeFile("variant", "linux-amd64\n");
+    writeFile("accounts_module_plugin.dylib", "x");
+
+    ModuleDirectory dir = ModuleDirectory::open(moduleDir(),
+                                                {QStringLiteral("darwin-arm64")});
+
+    ASSERT_EQ(dir.main().variant, QStringLiteral("darwin-arm64"));
+    EXPECT_EQ(dir.checkedVariant(), QStringLiteral("linux-amd64"));
+}
+
+TEST_F(UiPluginDirectoryTest, WithNoVariantFileTheResolvedMainNamesIt) {
+    makeModuleDir();
+    writeFile("manifest.json", kManifestWithMap);
+    writeFile("accounts_module_plugin.so", "x");
+
+    ModuleDirectory dir = ModuleDirectory::open(moduleDir(),
+                                                {QStringLiteral("linux-amd64")});
+
+    EXPECT_EQ(dir.checkedVariant(), QStringLiteral("linux-amd64"));
+}
+
+TEST_F(UiPluginDirectoryTest, WithNeitherThereIsNoVariantToCheck) {
+    makeModuleDir();
+    writeFile("manifest.json", kUiQmlQmlOnly);
+
+    EXPECT_TRUE(ModuleDirectory::open(moduleDir()).checkedVariant().isEmpty());
+}
