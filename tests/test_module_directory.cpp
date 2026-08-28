@@ -559,3 +559,167 @@ TEST_F(ModuleDirectoryPluginTest, CompareNames_SurfacesAnImpersonatingManifest) 
     EXPECT_EQ(dir.manifestName(), QStringLiteral("innocuous_module"));
     EXPECT_EQ(dir.embeddedMetadata()->name, QStringLiteral("package_manager"));
 }
+
+// =============================================================================
+// UI plugins: the same directory, the same manifest, one extra rule
+// =============================================================================
+
+namespace {
+
+const char* const kUiQmlQmlOnly = R"({
+  "name": "accounts_ui",
+  "version": "1.0.1",
+  "type": "ui_qml",
+  "view": "qml/AccountsView.qml",
+  "icon": "accounts.png"
+}
+)";
+
+}  // namespace
+
+class UiPluginDirectoryTest : public ModuleDirectoryTest {
+protected:
+    void writeIn(const QString& relative, const QByteArray& bytes) {
+        const QString target = QDir(moduleDir()).filePath(relative);
+        ASSERT_TRUE(QDir().mkpath(QFileInfo(target).absolutePath()));
+        QFile file(target);
+        ASSERT_TRUE(file.open(QIODevice::WriteOnly));
+        ASSERT_EQ(file.write(bytes), bytes.size());
+    }
+};
+
+TEST_F(UiPluginDirectoryTest, KindComesFromTheManifestType) {
+    makeModuleDir();
+    writeFile("manifest.json", kUiQmlQmlOnly);
+    EXPECT_EQ(ModuleDirectory::open(moduleDir()).kind(), ModuleKind::UiPlugin);
+    EXPECT_EQ(ModuleDirectory::open(moduleDir()).declaredType(), QStringLiteral("ui_qml"));
+
+    writeFile("manifest.json", kManifestWithMap);
+    EXPECT_EQ(ModuleDirectory::open(moduleDir()).kind(), ModuleKind::Core);
+
+    writeFile("manifest.json", R"({"name": "x", "version": "1.0.0"})");
+    EXPECT_EQ(ModuleDirectory::open(moduleDir()).kind(), ModuleKind::Unknown);
+}
+
+TEST_F(UiPluginDirectoryTest, AQmlOnlyUiPluginExpectsNoPluginAtAll) {
+    makeModuleDir();
+    writeFile("manifest.json", kUiQmlQmlOnly);
+    writeIn(QStringLiteral("qml/AccountsView.qml"), "Item {}");
+    writeFile("accounts.png", "png");
+
+    ModuleDirectory dir = ModuleDirectory::open(moduleDir());
+
+    EXPECT_EQ(dir.main().state, MainResolution::NotDeclared);
+    EXPECT_EQ(dir.pluginExpectation(), PluginExpectation::NotExpected);
+    EXPECT_EQ(dir.view().state, AssetResolution::Resolved);
+    EXPECT_EQ(dir.icon().state, AssetResolution::Resolved);
+}
+
+TEST_F(UiPluginDirectoryTest, ACoreModuleWithNoMainIsStillBroken) {
+    // Even carrying a `view`: the TYPE is what permits a package to have no
+    // plugin, and a core module is its plugin.
+    makeModuleDir();
+    writeFile("manifest.json",
+              R"({"name": "m", "version": "1.0.0", "type": "core",
+                  "view": "qml/Main.qml"})");
+    writeIn(QStringLiteral("qml/Main.qml"), "Item {}");
+
+    ModuleDirectory dir = ModuleDirectory::open(moduleDir());
+
+    EXPECT_EQ(dir.main().state, MainResolution::NotDeclared);
+    EXPECT_EQ(dir.view().state, AssetResolution::Resolved);
+    EXPECT_EQ(dir.pluginExpectation(), PluginExpectation::Missing);
+}
+
+TEST_F(UiPluginDirectoryTest, AUiPluginThatDeclaresNoViewStillNeedsAPlugin) {
+    makeModuleDir();
+    writeFile("manifest.json", R"({"name": "u", "version": "1.0.0", "type": "ui_qml"})");
+
+    ModuleDirectory dir = ModuleDirectory::open(moduleDir());
+
+    EXPECT_EQ(dir.view().state, AssetResolution::NotDeclared);
+    EXPECT_EQ(dir.pluginExpectation(), PluginExpectation::Missing);
+}
+
+TEST_F(UiPluginDirectoryTest, AnEmptyMainObjectDeclaresNoMain) {
+    makeModuleDir();
+    writeFile("manifest.json",
+              R"({"name": "u", "version": "1.0.0", "type": "ui_qml",
+                  "view": "qml/Main.qml", "main": {}})");
+    writeIn(QStringLiteral("qml/Main.qml"), "Item {}");
+
+    EXPECT_EQ(ModuleDirectory::open(moduleDir()).pluginExpectation(),
+              PluginExpectation::NotExpected);
+}
+
+TEST_F(UiPluginDirectoryTest, APartiallyPopulatedMainStillNeedsThisVariant) {
+    makeModuleDir();
+    writeFile("manifest.json",
+              R"({"name": "u", "version": "1.0.0", "type": "ui_qml",
+                  "view": "qml/Main.qml", "main": {"linux-amd64": "u.so"}})");
+    writeIn(QStringLiteral("qml/Main.qml"), "Item {}");
+    writeFile("variant", "darwin-arm64\n");
+
+    ModuleDirectory dir = ModuleDirectory::open(moduleDir());
+
+    EXPECT_EQ(dir.main().state, MainResolution::NoVariantMatch);
+    EXPECT_EQ(dir.pluginExpectation(), PluginExpectation::Missing);
+}
+
+TEST_F(UiPluginDirectoryTest, AViewTheDirectoryDoesNotHaveIsReported) {
+    makeModuleDir();
+    writeFile("manifest.json", kUiQmlQmlOnly);
+
+    ModuleDirectory dir = ModuleDirectory::open(moduleDir());
+
+    EXPECT_EQ(dir.view().state, AssetResolution::FileMissing);
+    EXPECT_EQ(dir.view().declaredPath, QStringLiteral("qml/AccountsView.qml"));
+    EXPECT_TRUE(dir.view().path.isEmpty());
+    EXPECT_EQ(dir.icon().state, AssetResolution::FileMissing);
+}
+
+TEST_F(UiPluginDirectoryTest, AViewPointingOutsideTheDirectoryIsRefused) {
+    makeModuleDir();
+    writeFile("manifest.json",
+              R"({"name": "u", "version": "1.0.0", "type": "ui_qml",
+                  "view": "../../etc/passwd", "icon": "../icon.png"})");
+
+    ModuleDirectory dir = ModuleDirectory::open(moduleDir());
+
+    EXPECT_EQ(dir.view().state, AssetResolution::OutsideModule);
+    EXPECT_EQ(dir.icon().state, AssetResolution::OutsideModule);
+    EXPECT_TRUE(dir.view().path.isEmpty());
+}
+
+TEST_F(UiPluginDirectoryTest, ACoreModuleDeclaresNeitherViewNorIcon) {
+    makeModuleDir();
+    writeFile("manifest.json", kManifestWithMap);
+
+    ModuleDirectory dir = ModuleDirectory::open(moduleDir());
+
+    EXPECT_EQ(dir.view().state, AssetResolution::NotDeclared);
+    EXPECT_EQ(dir.icon().state, AssetResolution::NotDeclared);
+}
+
+TEST_F(UiPluginDirectoryTest, AnEmptyIconStringDeclaresNothing) {
+    // Every 0.3.0 core module on disk writes "icon": "". It declares no icon;
+    // it does not declare one that is missing.
+    makeModuleDir();
+    writeFile("manifest.json",
+              R"({"name": "m", "version": "1.0.0", "type": "core", "icon": ""})");
+
+    EXPECT_EQ(ModuleDirectory::open(moduleDir()).icon().state,
+              AssetResolution::NotDeclared);
+}
+
+TEST_F(UiPluginDirectoryTest, AQmlOnlyPluginHasNoNameToDisagreeWith) {
+    makeModuleDir();
+    writeFile("manifest.json", kUiQmlQmlOnly);
+    writeIn(QStringLiteral("qml/AccountsView.qml"), "Item {}");
+
+    ModuleDirectory dir = ModuleDirectory::open(moduleDir());
+
+    EXPECT_EQ(dir.compareNames(), NameAgreement::NoPlugin);
+    EXPECT_FALSE(dir.embeddedMetadata().has_value());
+}
+

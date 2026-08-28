@@ -82,6 +82,59 @@ struct MainFile {
 };
 
 /**
+ * @brief What the manifest's `type` makes of this directory.
+ *
+ * The one distinction the layout turns on: a `ui_qml` package is a QML view
+ * that MAY be backed by a plugin, so declaring no `main` is legal for it and
+ * broken for everything else. Every other type is its plugin.
+ */
+enum class ModuleKind {
+    Core,      ///< the plugin IS the module; a main is mandatory
+    UiPlugin,  ///< `ui_qml`: a QML view, optionally backed by a plugin
+    Unknown,   ///< the manifest declares no type, or one with no rule here
+};
+
+/**
+ * @brief Outcome of resolving a path the manifest names — `view`, `icon`.
+ *
+ * Shaped like MainResolution for the same reason: "not declared" and "declared
+ * but not here" are different repairs and must not share a value.
+ */
+enum class AssetResolution {
+    Resolved,       ///< the manifest named it and that file is in the directory
+    NotDeclared,    ///< the manifest names none
+    FileMissing,    ///< named, but not in the directory
+    OutsideModule,  ///< the named path escapes the directory; never opened
+};
+
+/**
+ * @brief A file the manifest names by relative path.
+ */
+struct AssetFile {
+    AssetResolution state = AssetResolution::NotDeclared;
+    QString declaredPath;  ///< the relative path as the manifest wrote it
+    QString path;          ///< absolute, non-empty only when Resolved
+    QString error;
+
+    bool isResolved() const { return state == AssetResolution::Resolved; }
+};
+
+/**
+ * @brief Whether this package is supposed to have a plugin at all.
+ *
+ * MainFile says what resolution FOUND; this says whether the finding is a
+ * fault, which only the manifest's `type` can decide. A QML-only ui_qml
+ * package with no plugin is complete; a core module with no plugin is broken.
+ * Keeping them apart is what stops "be permissive for ui_qml" from leaking
+ * into every caller that reads MainFile.
+ */
+enum class PluginExpectation {
+    Present,      ///< a main resolved: there is a plugin to load
+    Missing,      ///< no plugin resolved, and this package needs one
+    NotExpected,  ///< a view-only ui_qml package legitimately has none
+};
+
+/**
  * @brief Whether manifest.json's `name` and the plugin's embedded `name` agree.
  *
  * Reported, never enforced. Refusing a mismatch is the host's policy call
@@ -92,6 +145,10 @@ enum class NameAgreement {
     Disagree,
     ManifestNameMissing,
     EmbeddedNameMissing,
+    /// There is no plugin here to carry a name, and none is supposed to be —
+    /// a view-only ui_qml package. Kept apart from EmbeddedNameMissing, which
+    /// is a plugin that exists and left its name blank.
+    NoPlugin,
 };
 
 /**
@@ -106,6 +163,11 @@ enum class NameAgreement {
  *     <dir>/manifest.sig    the detached signature, when the package was signed
  *     <dir>/variant         the variant that was physically extracted here
  *     <dir>/...             the payload: the plugin plus its private libraries
+ *
+ * A UI plugin is the same directory with the same manifest, so it is opened
+ * the same way. What it adds — `view`, `icon`, and permission to carry no
+ * plugin at all — is reported by members every directory has, and no caller
+ * branches on the type to read them.
  *
  * Nothing here is a policy decision. Every probe reports what it found —
  * including "absent", "unreadable" and "malformed" as distinct answers — and
@@ -180,10 +242,31 @@ public:
     /// manifest.json's `name`, empty unless the manifest is Present.
     QString manifestName() const;
 
+    /// manifest.json's `type` verbatim, empty unless the manifest is Present.
+    QString declaredType() const;
+
+    /// declaredType() reduced to the one rule this layout has for it.
+    ModuleKind kind() const;
+
     /// The resolved main plugin file. Resolution follows the package manager's
     /// rules: first matching candidate variant wins and does not fall through
     /// to a later one when its file is missing.
     const MainFile& main() const { return m_main; }
+
+    /// Whether a plugin is expected here at all. Read this, not main(), to
+    /// decide whether a directory is broken.
+    PluginExpectation pluginExpectation() const { return m_pluginExpectation; }
+
+    /// The QML entry point, from the manifest's `view`. NotDeclared for
+    /// anything that is not a ui_qml package — so no caller needs to test the
+    /// type before asking.
+    const AssetFile& view() const { return m_view; }
+
+    /// The package icon, from the manifest's `icon`. Resolved against this
+    /// directory, which answers "is the file the manifest names here?" — a
+    /// different question from the 0.4.0 icon CONTRACT (exact dimensions at
+    /// assets/icon.png), which checkInstalled() gets from logos-package.
+    const AssetFile& icon() const { return m_icon; }
 
     /// The variant list this directory was opened with, after the empty-list
     /// fallback to the installed `variant`.
@@ -197,8 +280,10 @@ public:
      * @brief The plugin metadata embedded in the resolved main.
      *
      * Read with QPluginLoader::metaData(), so the plugin is never instantiated.
-     * nullopt when the main did not resolve or carries no metadata. Computed on
-     * first call and cached.
+     * nullopt when the main did not resolve or carries no metadata — including
+     * the ordinary case of a QML-only ui_qml package, which has no binary at
+     * all. Check pluginExpectation() to tell that apart from a fault. Computed
+     * on first call and cached.
      */
     const std::optional<ModuleMetadata>& embeddedMetadata() const;
 
@@ -206,6 +291,7 @@ public:
     /// manifest name is reported ahead of a missing embedded one, since the
     /// manifest is the side a host trusts.
     NameAgreement compareNames() const;
+
 
 private:
     QString m_path;
@@ -216,7 +302,12 @@ private:
     ModuleFile m_variantFile;
     QString m_installedVariant;
     MainFile m_main;
+    AssetFile m_view;
+    AssetFile m_icon;
+    PluginExpectation m_pluginExpectation = PluginExpectation::Missing;
     QStringList m_payloadEntries;
+
+    PluginExpectation computePluginExpectation() const;
 
     mutable bool m_embeddedProbed = false;
     mutable std::optional<ModuleMetadata> m_embedded;

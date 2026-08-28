@@ -27,5 +27,8 @@ jobs:
       run: |
         export LM_BINARY="$(pwd)/result/bin/lm"
         export TEST_PLUGIN="$(pwd)/tests/examples/package_manager_plugin.so"
+        # The installed binary's compile-time default points into the nix build
+        # sandbox, which no longer exists out here.
+        export LOGOS_MODULE_TEST_EXAMPLES="$(pwd)/tests/examples"
         # Skip CLIPluginTest: pre-compiled test plugins have architecture issues in github actions
         ./result/bin/logos_module_tests --gtest_filter=-CLIPluginTest.*

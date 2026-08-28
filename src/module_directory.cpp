@@ -100,17 +100,26 @@ QString trimVariant(const QByteArray& bytes)
     return variant;
 }
 
+// The directory IS the module, so a declared path leaving it does not name
+// anything of this module's, whatever it names. Empty when it escapes.
+QString containedPath(const QDir& dir, const QString& declaredPath)
+{
+    const QString root = QDir::cleanPath(dir.absolutePath());
+    const QString candidate = QDir::cleanPath(dir.absoluteFilePath(declaredPath));
+    if (candidate != root && !candidate.startsWith(root + QLatin1Char('/'))) {
+        return QString();
+    }
+    return candidate;
+}
+
 MainFile locateMain(const QDir& dir, const QString& declaredPath, const QString& variant)
 {
     MainFile result;
     result.declaredPath = declaredPath;
     result.variant = variant;
 
-    // The directory IS the module, so a `main` pointing outside it does not
-    // name this module's plugin whatever it names. Refuse rather than follow.
-    const QString root = QDir::cleanPath(dir.absolutePath());
-    const QString candidate = QDir::cleanPath(dir.absoluteFilePath(declaredPath));
-    if (candidate != root && !candidate.startsWith(root + QLatin1Char('/'))) {
+    const QString candidate = containedPath(dir, declaredPath);
+    if (candidate.isEmpty()) {
         result.state = MainResolution::MalformedEntry;
         result.error = QStringLiteral("main '%1' resolves outside the module directory")
                            .arg(declaredPath);
@@ -197,6 +206,47 @@ MainFile resolveMain(const QJsonObject& manifest, const QDir& dir, const QString
     return result;
 }
 
+// `view` and `icon`: one relative path each, resolved the same way. Reported
+// for every directory, so a caller never tests the type to ask.
+AssetFile resolveAsset(const QJsonObject& manifest, const QDir& dir, const QString& field)
+{
+    AssetFile result;
+
+    const QString declared = manifest.value(field).toString();
+    if (declared.isEmpty()) {
+        result.state = AssetResolution::NotDeclared;
+        return result;
+    }
+    result.declaredPath = declared;
+
+    const QString candidate = containedPath(dir, declared);
+    if (candidate.isEmpty()) {
+        result.state = AssetResolution::OutsideModule;
+        result.error = QStringLiteral("%1 '%2' resolves outside the module directory")
+                           .arg(field, declared);
+        return result;
+    }
+    if (!QFileInfo(candidate).isFile()) {
+        result.state = AssetResolution::FileMissing;
+        result.error = QStringLiteral("%1 '%2' is not present in the module directory")
+                           .arg(field, declared);
+        return result;
+    }
+
+    result.state = AssetResolution::Resolved;
+    result.path = candidate;
+    return result;
+}
+
+// Mirrors logos-package's viewOnlyUiQml: type is ui_qml, `view` is set, and
+// `main` names no variant at all. An EMPTY main object counts as none there,
+// so it counts as none here — a partially populated main gets the strict check.
+bool declaresNoMain(const QJsonObject& manifest)
+{
+    const QJsonValue main = manifest.value(QStringLiteral("main"));
+    return main.isUndefined() || (main.isObject() && main.toObject().isEmpty());
+}
+
 QStringList readPayloadEntries(const QDir& dir)
 {
     QStringList entries = dir.entryList(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden,
@@ -263,10 +313,13 @@ ModuleDirectory ModuleDirectory::open(const QString& directoryPath,
 
     if (result.m_manifest.isPresent()) {
         result.m_main = resolveMain(result.m_manifest.parsed, dir, result.m_candidateVariants);
+        result.m_view = resolveAsset(result.m_manifest.parsed, dir, QStringLiteral("view"));
+        result.m_icon = resolveAsset(result.m_manifest.parsed, dir, QStringLiteral("icon"));
     } else {
         result.m_main.state = MainResolution::NoManifest;
         result.m_main.error = result.m_manifest.error;
     }
+    result.m_pluginExpectation = result.computePluginExpectation();
 
     return result;
 }
@@ -301,11 +354,47 @@ const std::optional<ModuleMetadata>& ModuleDirectory::embeddedMetadata() const
     return m_embedded;
 }
 
+QString ModuleDirectory::declaredType() const
+{
+    if (!m_manifest.isPresent()) {
+        return QString();
+    }
+    return m_manifest.parsed.value(QStringLiteral("type")).toString();
+}
+
+ModuleKind ModuleDirectory::kind() const
+{
+    const QString type = declaredType();
+    if (type == QLatin1String("ui_qml")) {
+        return ModuleKind::UiPlugin;
+    }
+    // Every other declared type is its plugin. Unknown is reserved for a
+    // manifest that names none, where nothing can be concluded.
+    return type.isEmpty() ? ModuleKind::Unknown : ModuleKind::Core;
+}
+
+PluginExpectation ModuleDirectory::computePluginExpectation() const
+{
+    if (m_main.isResolved()) {
+        return PluginExpectation::Present;
+    }
+    if (kind() == ModuleKind::UiPlugin &&
+        m_view.state != AssetResolution::NotDeclared &&
+        declaresNoMain(m_manifest.parsed)) {
+        return PluginExpectation::NotExpected;
+    }
+    return PluginExpectation::Missing;
+}
+
 NameAgreement ModuleDirectory::compareNames() const
 {
     const QString declared = manifestName();
     if (declared.isEmpty()) {
         return NameAgreement::ManifestNameMissing;
+    }
+
+    if (m_pluginExpectation == PluginExpectation::NotExpected) {
+        return NameAgreement::NoPlugin;
     }
 
     const std::optional<ModuleMetadata>& embedded = embeddedMetadata();

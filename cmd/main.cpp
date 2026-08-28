@@ -89,6 +89,7 @@ void printUsage() {
         << "  lm /path/to/plugin.so\n"
         << "  lm /path/to/plugin.so --json\n"
         << "  lm /path/to/modules/my_module\n"
+        << "  lm /path/to/plugins/my_ui\n"
         << "  lm metadata /path/to/plugin.so\n"
         << "  lm methods /path/to/plugin.so\n"
         << "  lm metadata /path/to/plugin.so --json\n"
@@ -302,12 +303,58 @@ QString mainResolutionName(MainResolution state) {
     return QStringLiteral("unknown");
 }
 
+QString moduleKindName(ModuleKind kind) {
+    switch (kind) {
+    case ModuleKind::Core:     return QStringLiteral("core");
+    case ModuleKind::UiPlugin: return QStringLiteral("ui_plugin");
+    case ModuleKind::Unknown:  return QStringLiteral("unknown");
+    }
+    return QStringLiteral("unknown");
+}
+
+QString assetResolutionName(AssetResolution state) {
+    switch (state) {
+    case AssetResolution::Resolved:      return QStringLiteral("resolved");
+    case AssetResolution::NotDeclared:   return QStringLiteral("not_declared");
+    case AssetResolution::FileMissing:   return QStringLiteral("file_missing");
+    case AssetResolution::OutsideModule: return QStringLiteral("outside_module");
+    }
+    return QStringLiteral("unknown");
+}
+
+QString pluginExpectationName(PluginExpectation expectation) {
+    switch (expectation) {
+    case PluginExpectation::Present:     return QStringLiteral("present");
+    case PluginExpectation::Missing:     return QStringLiteral("missing");
+    case PluginExpectation::NotExpected: return QStringLiteral("not_expected");
+    }
+    return QStringLiteral("unknown");
+}
+
+// One line each, so a reader never has to look a state up. Every one names the
+// repair, because "invalid" told nobody anything they could act on.
+QString assetDescription(const AssetFile& asset) {
+    switch (asset.state) {
+    case AssetResolution::Resolved:
+        return asset.declaredPath;
+    case AssetResolution::NotDeclared:
+        return QStringLiteral("(not declared)");
+    case AssetResolution::FileMissing:
+        return QStringLiteral("%1  MISSING — not in this directory").arg(asset.declaredPath);
+    case AssetResolution::OutsideModule:
+        return QStringLiteral("%1  REFUSED — resolves outside the module directory")
+            .arg(asset.declaredPath);
+    }
+    return asset.declaredPath;
+}
+
 QString nameAgreementName(NameAgreement agreement) {
     switch (agreement) {
     case NameAgreement::Agree:               return QStringLiteral("agree");
     case NameAgreement::Disagree:            return QStringLiteral("disagree");
     case NameAgreement::ManifestNameMissing: return QStringLiteral("manifest_name_missing");
     case NameAgreement::EmbeddedNameMissing: return QStringLiteral("embedded_name_missing");
+    case NameAgreement::NoPlugin:            return QStringLiteral("no_plugin");
     }
     return QStringLiteral("unknown");
 }
@@ -353,8 +400,14 @@ void reportDirectoryProblem(const ModuleDirectory& dir) {
 
     switch (dir.main().state) {
     case MainResolution::NotDeclared:
-        err << "Error: manifest.json declares no \"main\": " << manifestPath << "\n"
-            << "  Nothing in this directory is named as the module's plugin." << Qt::endl;
+        err << "Error: manifest.json declares no \"main\": " << manifestPath << "\n";
+        if (dir.kind() == ModuleKind::UiPlugin) {
+            // The one type allowed no main — but only when it says what to
+            // render instead. Without `view` there is nothing here to run.
+            err << "  A ui_qml package with no \"main\" must declare a \"view\"." << Qt::endl;
+        } else {
+            err << "  Nothing in this directory is named as the module's plugin." << Qt::endl;
+        }
         return;
     case MainResolution::MalformedEntry:
         err << "Error: manifest.json has an unusable \"main\": " << manifestPath << "\n"
@@ -393,6 +446,11 @@ void printDirectoryHuman(const ModuleDirectory& dir) {
     out << "Module Directory:\n"
         << "=================\n"
         << "Path:         " << dir.path() << "\n"
+        << "Type:         "
+        << (dir.declaredType().isEmpty() ? QStringLiteral("(none declared)")
+                                         : dir.declaredType())
+        << (dir.kind() == ModuleKind::UiPlugin ? QStringLiteral("  (UI plugin)") : QString())
+        << "\n"
         << "Manifest:     manifest.json (" << dir.manifest().bytes.size() << " bytes)\n"
         << "Signature:    "
         << (dir.signature().isPresent()
@@ -403,12 +461,28 @@ void printDirectoryHuman(const ModuleDirectory& dir) {
         << (dir.installedVariant().isEmpty() ? QStringLiteral("(no variant file)")
                                              : dir.installedVariant())
         << "\n"
-        << "Main:         " << root.relativeFilePath(dir.main().path);
-    if (!dir.main().variant.isEmpty()) {
-        out << "  [main." << dir.main().variant << "]";
+        << "Main:         ";
+    if (dir.pluginExpectation() == PluginExpectation::NotExpected) {
+        out << "(none — this ui_qml package is QML only)";
+    } else {
+        out << root.relativeFilePath(dir.main().path);
+        if (!dir.main().variant.isEmpty()) {
+            out << "  [main." << dir.main().variant << "]";
+        }
     }
-    out << "\n"
-        << "Payload:      " << dir.payloadEntries().size() << " file(s)\n";
+    out << "\n";
+
+    // Printed when the manifest names one, not when the type says it might.
+    // A core module declaring an icon gets the line; a ui_qml package that
+    // declares neither gets neither.
+    if (dir.view().state != AssetResolution::NotDeclared) {
+        out << "View:         " << assetDescription(dir.view()) << "\n";
+    }
+    if (dir.icon().state != AssetResolution::NotDeclared) {
+        out << "Icon:         " << assetDescription(dir.icon()) << "\n";
+    }
+
+    out << "Payload:      " << dir.payloadEntries().size() << " file(s)\n";
     for (const QString& entry : dir.payloadEntries()) {
         out << "  " << entry << "\n";
     }
@@ -426,9 +500,21 @@ void printDirectoryHuman(const ModuleDirectory& dir) {
 // The additive half of the JSON. Emitted only for a directory input, and only
 // under the object-shaped commands — `methods`/`events` print a bare array and
 // turning that into an object is exactly the break other parsers would feel.
+QJsonObject assetJson(const AssetFile& asset) {
+    QJsonObject obj;
+    obj["state"] = assetResolutionName(asset.state);
+    if (!asset.declaredPath.isEmpty())
+        obj["declared"] = asset.declaredPath;
+    if (!asset.path.isEmpty())
+        obj["path"] = asset.path;
+    return obj;
+}
+
 QJsonObject directoryJson(const ModuleDirectory& dir) {
     QJsonObject obj;
     obj["path"] = dir.path();
+    obj["type"] = dir.declaredType();
+    obj["kind"] = moduleKindName(dir.kind());
 
     QJsonObject manifest;
     manifest["size_bytes"] = static_cast<int>(dir.manifest().bytes.size());
@@ -447,14 +533,20 @@ QJsonObject directoryJson(const ModuleDirectory& dir) {
     obj["candidate_variants"] = QJsonArray::fromStringList(dir.candidateVariants());
 
     QJsonObject main;
-    // "resolved" today, since lm reports the other states on stderr and exits
-    // before it gets here. Named anyway so the shape survives that changing.
+    // "resolved", or "not_declared" for a QML-only ui_qml package — lm reports
+    // the states that ARE faults on stderr and exits before it gets here.
     main["state"] = mainResolutionName(dir.main().state);
     main["path"] = dir.main().path;
     main["declared"] = dir.main().declaredPath;
     if (!dir.main().variant.isEmpty())
         main["variant"] = dir.main().variant;
     obj["main"] = main;
+
+    // The verdict on main(), which needs the type to reach. A parser reading
+    // only main.state cannot tell a broken module from a QML-only plugin.
+    obj["plugin"] = pluginExpectationName(dir.pluginExpectation());
+    obj["view"] = assetJson(dir.view());
+    obj["icon"] = assetJson(dir.icon());
 
     obj["payload"] = QJsonArray::fromStringList(dir.payloadEntries());
     obj["name_agreement"] = nameAgreementName(dir.compareNames());
@@ -465,7 +557,7 @@ QJsonObject directoryJson(const ModuleDirectory& dir) {
 // because every command needs the same answer and a directory report must be
 // printed once rather than by each command it passes through.
 struct ResolvedInput {
-    QString pluginPath;                        ///< what to load, either way
+    QString pluginPath;   ///< what to load; empty when the package has no plugin
     std::optional<ModuleDirectory> directory;  ///< only when a directory was given
 };
 
@@ -489,11 +581,34 @@ std::optional<ResolvedInput> resolveInput(const QString& path, const QStringList
     }
 
     ModuleDirectory dir = ModuleDirectory::open(path, variants);
-    if (!dir.main().isResolved()) {
+    if (dir.pluginExpectation() == PluginExpectation::Missing) {
         reportDirectoryProblem(dir);
         return std::nullopt;
     }
+    // NotExpected leaves pluginPath empty: a QML-only ui_qml package has no
+    // plugin, and that is a complete package, not a fault to report.
     return ResolvedInput{dir.main().path, std::move(dir)};
+}
+
+// Every plugin command needs a plugin. A QML-only ui_qml package has none,
+// which is an absence to state rather than a failure to report — so each of
+// them says so and succeeds.
+int cmdWithoutPlugin(const QString& command, bool jsonOutput, const QJsonObject* dirObj) {
+    if (!jsonOutput) {
+        out << "(no plugin — this ui_qml package is QML only)\n";
+        return 0;
+    }
+    if (command == "methods" || command == "events") {
+        // Still a bare array: a parser reading these should not have to
+        // special-case the one package type with nothing to list.
+        out << QJsonDocument(QJsonArray()).toJson(QJsonDocument::Indented);
+        return 0;
+    }
+    QJsonObject obj;
+    if (dirObj)
+        obj["module_directory"] = *dirObj;
+    out << QJsonDocument(obj).toJson(QJsonDocument::Indented);
+    return 0;
 }
 
 // The commands below are only ever reached through resolveInput(), which has
@@ -815,6 +930,10 @@ int main(int argc, char* argv[]) {
         }
     }
     const QJsonObject* dirObjPtr = dirObj ? &*dirObj : nullptr;
+
+    if (input->pluginPath.isEmpty()) {
+        return cmdWithoutPlugin(QString::fromStdString(command), jsonOutput, dirObjPtr);
+    }
 
     if (defaultMode) {
         return cmdInfo(input->pluginPath, jsonOutput, debugOutput, dirObjPtr);

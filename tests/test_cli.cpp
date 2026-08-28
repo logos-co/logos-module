@@ -9,6 +9,8 @@
 #include <set>
 #include <vector>
 
+#include "test_examples_path.h"
+
 // popen/pclose are spelled with a leading underscore in the Windows CRT, and
 // _pclose returns the child's exit code directly rather than the encoded wait
 // status, so WEXITSTATUS (which lives in <sys/wait.h>, absent on mingw) neither
@@ -866,4 +868,47 @@ TEST_F(CLIPluginTestDirectory, Default_HumanPrintsTheDirectoryReportExactlyOnce)
         ++count;
     }
     EXPECT_EQ(count, 1u) << result.output;
+}
+
+// =============================================================================
+// A ui_qml package with no plugin is a complete package
+// =============================================================================
+
+class CLIUiPluginTest : public CLITest {
+protected:
+    std::string qmlOnlyInstall() const {
+        return testExamplesDir() + "/installed_qml_only";
+    }
+};
+
+TEST_F(CLIUiPluginTest, InspectingAQmlOnlyUiPluginSucceeds) {
+    auto result = runCommand(qmlOnlyInstall());
+
+    EXPECT_EQ(result.exitCode, 0) << result.output;
+    EXPECT_NE(result.output.find("Type:         ui_qml  (UI plugin)"), std::string::npos)
+        << result.output;
+    EXPECT_NE(result.output.find("View:         qml/Main.qml"), std::string::npos)
+        << result.output;
+    EXPECT_NE(result.output.find("Icon:         assets/icon.png"), std::string::npos)
+        << result.output;
+    EXPECT_NE(result.output.find("(no plugin"), std::string::npos) << result.output;
+}
+
+TEST_F(CLIUiPluginTest, MethodsOfAQmlOnlyUiPluginAreAnEmptyList) {
+    auto result = runCommand("methods " + qmlOnlyInstall() + " --json");
+
+    EXPECT_EQ(result.exitCode, 0) << result.output;
+    EXPECT_NE(result.output.find("["), std::string::npos) << result.output;
+}
+
+TEST_F(CLIUiPluginTest, TheDirectoryJsonCarriesTheUiFields) {
+    auto result = runCommand(qmlOnlyInstall() + " --json");
+
+    EXPECT_EQ(result.exitCode, 0) << result.output;
+    EXPECT_NE(result.output.find("\"plugin\": \"not_expected\""), std::string::npos)
+        << result.output;
+    EXPECT_NE(result.output.find("\"kind\": \"ui_plugin\""), std::string::npos)
+        << result.output;
+    EXPECT_NE(result.output.find("\"name_agreement\": \"no_plugin\""), std::string::npos)
+        << result.output;
 }

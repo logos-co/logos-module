@@ -1,0 +1,17 @@
+{
+  "author": "",
+  "category": "",
+  "dependencies": [],
+  "description": "a ui_qml package that is QML only",
+  "hashes": {
+    "root": "a6dac4d18bd1ee9111feb6446c75e84e8d9aa3c09ff9220da9b62f736454462f",
+    "variants": "3f6b13655dde2926f839786521c77be097ba7028d275decec3829e655f611392",
+    "variants/darwin-arm64": "669dafef29e3925a32c886955361bd63ce73e1586b77691d33a7e67ee8493086"
+  },
+  "icon": "assets/icon.png",
+  "manifestVersion": "0.5.0",
+  "name": "qml_only_ui",
+  "type": "ui_qml",
+  "version": "0.0.1",
+  "view": "qml/Main.qml"
+}
