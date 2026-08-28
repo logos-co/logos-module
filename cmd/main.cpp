@@ -671,7 +671,10 @@ int cmdWithoutPlugin(const QString& command, bool jsonOutput, const QJsonObject*
 QString integrityLine(const InstalledChecks& checks) {
     switch (checks.integrity) {
     case IntegrityState::Ok:
-        return QStringLiteral("ok — the installed files hash to hashes[\"variants/%1\"]")
+        // Not just the variant leaf: a package with root assets answers to
+        // hashes["assets"] as well, and both had to come out right.
+        return QStringLiteral("ok — the installed files answer to the manifest's "
+                              "hashes for variant '%1'")
             .arg(checks.variant);
     case IntegrityState::Mismatch:
         return QStringLiteral("MISMATCH — %1").arg(checks.integrityDetail);
