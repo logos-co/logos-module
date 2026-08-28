@@ -93,6 +93,9 @@ platforms. (Compiling and inspecting a real plugin is the
 
 ### 2.1 Detect this machine's variant
 
+Stash the variant name and the shared-library extension in two files; every step
+below re-reads them, so nothing further down has to know which platform it is on.
+
 ```bash
 case "$(uname -s) $(uname -m)" in
   "Linux x86_64")   echo linux-x86_64  > variant.txt; echo so    > ext.txt ;;
@@ -112,8 +115,12 @@ entry point in the manifest's `main` map, and computes the content hashes over
 everything it stored.
 
 ```bash
+V="$(cat variant.txt)"; E="$(cat ext.txt)"
+mkdir -p payload/lib
+echo 'stub plugin' > "payload/greeter_plugin.$E"
+echo 'stub helper' > "payload/lib/libhelper.$E"
 lgx create greeter
-lgx add greeter.lgx --variant linux-x86_64 --files payload --main greeter_plugin.so -y
+lgx add greeter.lgx --variant "$V" --files payload --main "greeter_plugin.$E" -y
 ```
 
 ### 2.3 Sign it
@@ -126,6 +133,7 @@ package.
 
 ```bash
 lgx keygen --name publisher --output-dir ./keys
+cp ./keys/publisher.did publisher-did.txt   # every --did below re-reads this
 lgx sign greeter.lgx --key publisher --keys-dir ./keys --name "Logos Demo"
 ```
 
@@ -159,10 +167,12 @@ tar -tzf greeter.lgx
 ### 3.2 Unpack one variant into a module directory
 
 ```bash
+V="$(cat variant.txt)"
+mkdir -p stage modules/greeter
 tar -xzf greeter.lgx -C stage
 cp stage/manifest.json stage/manifest.sig modules/greeter/
-cp -R stage/variants/linux-x86_64/. modules/greeter/
-echo linux-x86_64 > modules/greeter/variant
+cp -R "stage/variants/$V/." modules/greeter/
+echo "$V" > modules/greeter/variant
 ```
 
 ---
@@ -238,7 +248,7 @@ two checks answer different questions and the report keeps them apart.
 
 ```bash
 cp -R modules/greeter modules/tampered
-printf 'x' >> modules/tampered/lib/libhelper.so
+printf 'x' >> "modules/tampered/lib/libhelper.$(cat ext.txt)"
 lm verify modules/tampered --did "$(cat publisher-did.txt)"
 ```
 
@@ -273,6 +283,7 @@ bytes are not the ones that key signed.
 ### 7.1 Rewrite the manifest, keep the signature
 
 ```bash
+cp -R modules/greeter modules/relabelled
 sed 's/"version": "0.0.1"/"version": "9.9.9"/' modules/greeter/manifest.json \
   > modules/relabelled/manifest.json
 ```
@@ -306,7 +317,7 @@ answers.
 ### 8.1 verify on a plugin file
 
 ```bash
-lm verify modules/greeter/greeter_plugin.so
+lm verify "modules/greeter/greeter_plugin.$(cat ext.txt)"
 ```
 
 ### 8.2 --did on a command that is not verify

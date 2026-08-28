@@ -24,7 +24,7 @@ intro: |
   with the four ways a directory can fail to name a plugin, and the one package type for
   which naming no plugin at all is perfectly correct.
 
-what_you_build: "A `greeter` Qt plugin compiled from source, installed into a module directory, plus a QML-only UI package and four deliberately broken directories to read `lm`'s diagnostics off."
+what_you_build: "A `greeter` Qt plugin compiled from source, installed into a module directory, plus a QML-only UI package and a set of deliberately broken directories to read `lm`'s diagnostics off."
 
 what_you_learn:
   - What `lm metadata` / `methods` / `events` read out of a compiled plugin, and where each comes from
@@ -82,9 +82,10 @@ sections:
         call over the Logos runtime, which is why "what does `lm methods` say" is the same
         question as "what is this module's API".
 
-      We compile it inside this repository's own dev shell, so the Qt it links is the Qt
-      `lm` was built against, and the plugin is native to whichever machine is running
-      this — no pre-compiled binary that only loads on one of them.
+      Three files — write each one into the working directory as it appears below — and
+      then one build. We compile inside this repository's own dev shell, so the Qt it links
+      is the Qt `lm` was built against, and the plugin is native to whichever machine is
+      running this — no pre-compiled binary that only loads on one of them.
     steps:
       - title: "The embedded metadata"
         text: |
@@ -110,7 +111,8 @@ sections:
 
       - title: "The plugin class"
         text: |
-          Two `Q_INVOKABLE` methods, which is the whole public API of this module.
+          `greeter_plugin.h`, beside it. Two `Q_INVOKABLE` methods, which is the whole
+          public API of this module.
         file:
           path: greeter_plugin.h
           content: |
@@ -134,6 +136,8 @@ sections:
 
       - title: "The build"
         text: |
+          And `CMakeLists.txt`, the third and last file in the directory.
+
           `MODULE` is CMake's word for a library that is only ever `dlopen`ed, never linked
           against — which is what a plugin is. `SUFFIX` names it the way this platform
           names shared libraries, `.so` on Linux and `.dylib` on macOS, because a real
@@ -288,23 +292,31 @@ sections:
           echo "$V" > modules/greeter/variant
           echo "installed greeter for variant $V"
         code_block: |
+          case "$(uname -s) $(uname -m)" in
+            "Linux x86_64")   V=linux-x86_64 ;;
+            "Linux aarch64")  V=linux-arm64 ;;
+            "Darwin arm64")   V=darwin-arm64 ;;
+            "Darwin x86_64")  V=darwin-x86_64 ;;
+          esac
+          echo "$V" > variant.txt          # the later steps re-read this
+
           mkdir -p modules/greeter
           cp build/greeter_plugin.so modules/greeter/
-          cat > modules/greeter/manifest.json <<'EOF'
+          cat > modules/greeter/manifest.json <<EOF
           {
             "author": "Logos",
             "category": "",
             "dependencies": [],
             "description": "A minimal Logos module, built to be inspected.",
             "icon": "",
-            "main": { "linux-x86_64": "greeter_plugin.so" },
+            "main": { "$V": "greeter_plugin.so" },
             "manifestVersion": "0.5.0",
             "name": "greeter",
             "type": "core",
             "version": "1.2.0"
           }
           EOF
-          echo linux-x86_64 > modules/greeter/variant
+          echo "$V" > modules/greeter/variant
         expect_contains:
           - "installed greeter for variant "
 
@@ -389,8 +401,8 @@ sections:
       - title: "lm reports the absence and succeeds"
         text: |
           `View:` and `Icon:` appear because the manifest declares them, and `lm` checks
-          that both actually resolve inside the directory — a `view` naming a file that was
-          never extracted is reported as `MISSING` right on that line.
+          that both actually resolve inside the directory — the next step is what that
+          check looks like when one of them does not.
         run: |
           ./lm/bin/lm plugins/greeter_ui
           echo "exit: $?"
@@ -419,6 +431,29 @@ sections:
           lm methods plugins/greeter_ui --json
         expect_contains:
           - '"plugin": "not_expected"'
+          - "exit: 0"
+
+      - title: "A view that was never extracted"
+        text: |
+          `view` is a path into the directory, so it can dangle exactly the way `main` can.
+          `lm` says so on the `View:` line rather than anywhere else, and still exits `0`:
+          a package whose QML is missing is a broken *install*, not a malformed manifest,
+          and the two are different repairs. `--json` carries the same verdict as
+          `view.state` for whatever is doing the installing.
+        run: |
+          cp -R plugins/greeter_ui plugins/dangling_view
+          rm plugins/dangling_view/qml/Main.qml
+          ./lm/bin/lm plugins/dangling_view > report.txt
+          echo "exit: $?"
+          grep "^View:" report.txt
+          ./lm/bin/lm plugins/dangling_view --json | grep -A3 '"view"'
+        code_block: |
+          cp -R plugins/greeter_ui plugins/dangling_view
+          rm plugins/dangling_view/qml/Main.qml
+          lm plugins/dangling_view
+        expect_contains:
+          - "View:         qml/Main.qml  MISSING — not in this directory"
+          - '"state": "file_missing"'
           - "exit: 0"
 
   - title: "When a directory cannot name a plugin"
@@ -450,32 +485,23 @@ sections:
 
       - title: "2. A manifest with no \"main\""
         text: |
-          Here is the contrast with the QML-only package above: the same field is absent,
-          but this manifest says `"type": "core"`, and a core module is *only* its plugin.
-          Nothing in the directory is named as the thing to load, so there is nothing to
-          run — and `lm` says that rather than pointing at `view`.
+          Take the good manifest and delete the one line that names the plugin. Here is the
+          contrast with the QML-only package above: the same field is absent, but this
+          manifest says `"type": "core"`, and a core module is *only* its plugin. Nothing in
+          the directory is named as the thing to load, so there is nothing to run — and `lm`
+          says that rather than pointing at `view`.
         run: |
-          V="$(cat variant.txt)"
           mkdir -p broken/no_main
           cp build/greeter_plugin.{ext} broken/no_main/
-          cat > broken/no_main/manifest.json <<'EOF'
-          {
-            "author": "Logos",
-            "category": "",
-            "dependencies": [],
-            "description": "A core module that names no plugin.",
-            "icon": "",
-            "manifestVersion": "0.5.0",
-            "name": "greeter",
-            "type": "core",
-            "version": "1.2.0"
-          }
-          EOF
-          echo "$V" > broken/no_main/variant
+          grep -v '"main"' modules/greeter/manifest.json > broken/no_main/manifest.json
+          cp modules/greeter/variant broken/no_main/
           ./lm/bin/lm broken/no_main
           echo "exit: $?"
         code_block: |
-          # manifest.json with "type": "core" and no "main"
+          mkdir -p broken/no_main
+          cp build/greeter_plugin.so broken/no_main/
+          grep -v '"main"' modules/greeter/manifest.json > broken/no_main/manifest.json
+          cp modules/greeter/variant broken/no_main/
           lm broken/no_main
         expect_contains:
           - 'Error: manifest.json declares no "main":'
@@ -489,26 +515,17 @@ sections:
           instead; with neither, there is genuinely nothing here to run, and the message
           names the field that would make it whole.
         run: |
-          V="$(cat variant.txt)"
           mkdir -p broken/ui_no_view
-          cat > broken/ui_no_view/manifest.json <<'EOF'
-          {
-            "author": "Logos",
-            "category": "",
-            "dependencies": [],
-            "description": "A ui_qml package with neither main nor view.",
-            "icon": "",
-            "manifestVersion": "0.5.0",
-            "name": "greeter_ui",
-            "type": "ui_qml",
-            "version": "1.2.0"
-          }
-          EOF
-          echo "$V" > broken/ui_no_view/variant
+          sed 's/"type": "core"/"type": "ui_qml"/' broken/no_main/manifest.json \
+            > broken/ui_no_view/manifest.json
+          cp modules/greeter/variant broken/ui_no_view/
           ./lm/bin/lm broken/ui_no_view
           echo "exit: $?"
         code_block: |
-          # the same manifest as above, but "type": "ui_qml"
+          mkdir -p broken/ui_no_view
+          sed 's/"type": "core"/"type": "ui_qml"/' broken/no_main/manifest.json \
+            > broken/ui_no_view/manifest.json
+          cp modules/greeter/variant broken/ui_no_view/
           lm broken/ui_no_view
         expect_contains:
           - 'Error: manifest.json declares no "main":'
@@ -521,14 +538,14 @@ sections:
           in the directory. That is an installation fault rather than a packaging one, so
           the message names the two ways it happens.
         run: |
-          V="$(cat variant.txt)"
           mkdir -p broken/missing_file
-          cp modules/greeter/manifest.json broken/missing_file/
-          echo "$V" > broken/missing_file/variant
+          cp modules/greeter/manifest.json modules/greeter/variant broken/missing_file/
           ./lm/bin/lm broken/missing_file
           echo "exit: $?"
         code_block: |
-          # the good manifest, copied into a directory whose payload was never extracted
+          # the good manifest and variant, in a directory whose payload was never extracted
+          mkdir -p broken/missing_file
+          cp modules/greeter/manifest.json modules/greeter/variant broken/missing_file/
           lm broken/missing_file
         expect_contains:
           - "Error: manifest.json names a main that is not in the module directory:"
@@ -541,28 +558,19 @@ sections:
           installed on. `lm` prints both sides of the mismatch: the variants `main` offers,
           and the ones it tried.
         run: |
-          V="$(cat variant.txt)"
           mkdir -p broken/wrong_variant
           cp build/greeter_plugin.{ext} broken/wrong_variant/
-          cat > broken/wrong_variant/manifest.json <<'EOF'
-          {
-            "author": "Logos",
-            "category": "",
-            "dependencies": [],
-            "description": "A package built for a platform this is not.",
-            "icon": "",
-            "main": { "aix-ppc64": "greeter_plugin.a" },
-            "manifestVersion": "0.5.0",
-            "name": "greeter",
-            "type": "core",
-            "version": "1.2.0"
-          }
-          EOF
-          echo "$V" > broken/wrong_variant/variant
+          sed 's/"main": {[^}]*}/"main": { "aix-ppc64": "greeter_plugin.a" }/' \
+            modules/greeter/manifest.json > broken/wrong_variant/manifest.json
+          cp modules/greeter/variant broken/wrong_variant/
           ./lm/bin/lm broken/wrong_variant
           echo "exit: $?"
         code_block: |
-          # "main": { "aix-ppc64": "greeter_plugin.a" }, installed on Linux or macOS
+          mkdir -p broken/wrong_variant
+          cp build/greeter_plugin.so broken/wrong_variant/
+          sed 's/"main": {[^}]*}/"main": { "aix-ppc64": "greeter_plugin.a" }/' \
+            modules/greeter/manifest.json > broken/wrong_variant/manifest.json
+          cp modules/greeter/variant broken/wrong_variant/
           lm broken/wrong_variant
         expect_contains:
           - "Error: manifest.json declares no main for this variant:"
@@ -604,8 +612,10 @@ sections:
           ./lm/bin/lm metadata broken/no_variant_file --variant "$V"
           echo "with --variant, exit: $?"
         code_block: |
-          lm metadata broken/no_variant_file                          # fails: nothing to match
-          lm metadata broken/no_variant_file --variant linux-x86_64   # resolves
+          cp -R modules/greeter broken/no_variant_file
+          rm broken/no_variant_file/variant
+          lm metadata broken/no_variant_file    # fails: nothing to match
+          lm metadata broken/no_variant_file --variant "$(cat variant.txt)"
         expect_contains:
           - "tried:    (nothing — no `variant` file here; pass --variant <name>)"
           - "without --variant, exit: 1"
@@ -673,4 +683,7 @@ sections:
       | `declares no main for this variant` | the package carries no build for this platform |
 
       The one that is *not* a failure: a `ui_qml` package with a `view` and no `main` is
-      QML only, and `lm` reports the absent plugin and exits `0`.
+      QML only, and `lm` reports the absent plugin and exits `0`. A `view` that names a file
+      nobody extracted is not one either — it is reported as `MISSING` on the `View:` line,
+      and still exits `0`, because a half-extracted install and a malformed manifest are
+      different things to go and fix.

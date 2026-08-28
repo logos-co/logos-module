@@ -90,6 +90,9 @@ sections:
       [inspection doc-test](lm-inspect.md).)
     steps:
       - title: "Detect this machine's variant"
+        text: |
+          Stash the variant name and the shared-library extension in two files; every step
+          below re-reads them, so nothing further down has to know which platform it is on.
         run: |
           case "$(uname -s) $(uname -m)" in
             "Linux x86_64")   echo linux-x86_64  > variant.txt; echo so    > ext.txt ;;
@@ -115,8 +118,12 @@ sections:
           ./lgx/bin/lgx create greeter
           ./lgx/bin/lgx add greeter.lgx --variant "$V" --files payload --main "greeter_plugin.$E" -y
         code_block: |
+          V="$(cat variant.txt)"; E="$(cat ext.txt)"
+          mkdir -p payload/lib
+          echo 'stub plugin' > "payload/greeter_plugin.$E"
+          echo 'stub helper' > "payload/lib/libhelper.$E"
           lgx create greeter
-          lgx add greeter.lgx --variant linux-x86_64 --files payload --main greeter_plugin.so -y
+          lgx add greeter.lgx --variant "$V" --files payload --main "greeter_plugin.$E" -y
         expect_contains:
           - "Created package: greeter.lgx"
           - "Added variant"
@@ -134,6 +141,7 @@ sections:
           ./lgx/bin/lgx sign greeter.lgx --key publisher --keys-dir ./keys --name "Logos Demo"
         code_block: |
           lgx keygen --name publisher --output-dir ./keys
+          cp ./keys/publisher.did publisher-did.txt   # every --did below re-reads this
           lgx sign greeter.lgx --key publisher --keys-dir ./keys --name "Logos Demo"
         expect_contains:
           - "Keypair generated:"
@@ -179,10 +187,12 @@ sections:
           echo "installed for $V:"
           (cd modules/greeter && find . -type f | sort)
         code_block: |
+          V="$(cat variant.txt)"
+          mkdir -p stage modules/greeter
           tar -xzf greeter.lgx -C stage
           cp stage/manifest.json stage/manifest.sig modules/greeter/
-          cp -R stage/variants/linux-x86_64/. modules/greeter/
-          echo linux-x86_64 > modules/greeter/variant
+          cp -R "stage/variants/$V/." modules/greeter/
+          echo "$V" > modules/greeter/variant
         expect_contains:
           - "./manifest.json"
           - "./manifest.sig"
@@ -287,7 +297,7 @@ sections:
           echo "exit: $?"
         code_block: |
           cp -R modules/greeter modules/tampered
-          printf 'x' >> modules/tampered/lib/libhelper.so
+          printf 'x' >> "modules/tampered/lib/libhelper.$(cat ext.txt)"
           lm verify modules/tampered --did "$(cat publisher-did.txt)"
         expect_contains:
           - "Integrity:  MISMATCH — installed content does not match manifest hashes"
@@ -337,6 +347,7 @@ sections:
           grep -q '"version": "9.9.9"' modules/relabelled/manifest.json && echo "manifest relabelled to 9.9.9"
           cmp -s modules/greeter/manifest.sig modules/relabelled/manifest.sig && echo "manifest.sig untouched"
         code_block: |
+          cp -R modules/greeter modules/relabelled
           sed 's/"version": "0.0.1"/"version": "9.9.9"/' modules/greeter/manifest.json \
             > modules/relabelled/manifest.json
         expect_contains:
@@ -384,7 +395,7 @@ sections:
           E="$(cat ext.txt)"
           ./lm/bin/lm verify "modules/greeter/greeter_plugin.$E"
           echo "exit: $?"
-        code_block: "lm verify modules/greeter/greeter_plugin.so"
+        code_block: 'lm verify "modules/greeter/greeter_plugin.$(cat ext.txt)"'
         expect_contains:
           - "Error: verify takes an installed module directory;"
           - "and a bare plugin has neither."

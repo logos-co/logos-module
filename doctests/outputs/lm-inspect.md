@@ -21,7 +21,7 @@ so every load is native on the machine running it, and then walks both shapes �
 with the four ways a directory can fail to name a plugin, and the one package type for
 which naming no plugin at all is perfectly correct.
 
-**What you'll build:** A `greeter` Qt plugin compiled from source, installed into a module directory, plus a QML-only UI package and four deliberately broken directories to read `lm`'s diagnostics off.
+**What you'll build:** A `greeter` Qt plugin compiled from source, installed into a module directory, plus a QML-only UI package and a set of deliberately broken directories to read `lm`'s diagnostics off.
 
 **What you'll learn:**
 
@@ -83,9 +83,10 @@ library holding one `QObject` class, with two things that matter to an inspector
   call over the Logos runtime, which is why "what does `lm methods` say" is the same
   question as "what is this module's API".
 
-We compile it inside this repository's own dev shell, so the Qt it links is the Qt
-`lm` was built against, and the plugin is native to whichever machine is running
-this — no pre-compiled binary that only loads on one of them.
+Three files — write each one into the working directory as it appears below — and
+then one build. We compile inside this repository's own dev shell, so the Qt it links
+is the Qt `lm` was built against, and the plugin is native to whichever machine is
+running this — no pre-compiled binary that only loads on one of them.
 
 ### 2.1 The embedded metadata
 
@@ -111,7 +112,8 @@ form additionally says which versions will do.
 
 ### 2.2 The plugin class
 
-Two `Q_INVOKABLE` methods, which is the whole public API of this module.
+`greeter_plugin.h`, beside it. Two `Q_INVOKABLE` methods, which is the whole
+public API of this module.
 
 ```cpp
 #pragma once
@@ -134,6 +136,8 @@ public:
 ```
 
 ### 2.3 The build
+
+And `CMakeLists.txt`, the third and last file in the directory.
 
 `MODULE` is CMake's word for a library that is only ever `dlopen`ed, never linked
 against — which is what a plugin is. `SUFFIX` names it the way this platform
@@ -246,23 +250,31 @@ Detect this machine's variant, then write the manifest and the `variant` file
 around the plugin we compiled.
 
 ```bash
+case "$(uname -s) $(uname -m)" in
+  "Linux x86_64")   V=linux-x86_64 ;;
+  "Linux aarch64")  V=linux-arm64 ;;
+  "Darwin arm64")   V=darwin-arm64 ;;
+  "Darwin x86_64")  V=darwin-x86_64 ;;
+esac
+echo "$V" > variant.txt          # the later steps re-read this
+
 mkdir -p modules/greeter
 cp build/greeter_plugin.so modules/greeter/
-cat > modules/greeter/manifest.json <<'EOF'
+cat > modules/greeter/manifest.json <<EOF
 {
   "author": "Logos",
   "category": "",
   "dependencies": [],
   "description": "A minimal Logos module, built to be inspected.",
   "icon": "",
-  "main": { "linux-x86_64": "greeter_plugin.so" },
+  "main": { "$V": "greeter_plugin.so" },
   "manifestVersion": "0.5.0",
   "name": "greeter",
   "type": "core",
   "version": "1.2.0"
 }
 EOF
-echo linux-x86_64 > modules/greeter/variant
+echo "$V" > modules/greeter/variant
 ```
 
 ### 4.2 Read the directory
@@ -333,8 +345,8 @@ echo "assembled greeter_ui"
 ### 5.2 lm reports the absence and succeeds
 
 `View:` and `Icon:` appear because the manifest declares them, and `lm` checks
-that both actually resolve inside the directory — a `view` naming a file that was
-never extracted is reported as `MISSING` right on that line.
+that both actually resolve inside the directory — the next step is what that
+check looks like when one of them does not.
 
 ```bash
 lm plugins/greeter_ui
@@ -351,6 +363,20 @@ plugin is genuinely missing.
 ```bash
 lm plugins/greeter_ui --json | grep '"plugin"'
 lm methods plugins/greeter_ui --json
+```
+
+### 5.4 A view that was never extracted
+
+`view` is a path into the directory, so it can dangle exactly the way `main` can.
+`lm` says so on the `View:` line rather than anywhere else, and still exits `0`:
+a package whose QML is missing is a broken *install*, not a malformed manifest,
+and the two are different repairs. `--json` carries the same verdict as
+`view.state` for whatever is doing the installing.
+
+```bash
+cp -R plugins/greeter_ui plugins/dangling_view
+rm plugins/dangling_view/qml/Main.qml
+lm plugins/dangling_view
 ```
 
 ---
@@ -375,13 +401,17 @@ lm broken/no_manifest
 
 ### 6.2 2. A manifest with no "main"
 
-Here is the contrast with the QML-only package above: the same field is absent,
-but this manifest says `"type": "core"`, and a core module is *only* its plugin.
-Nothing in the directory is named as the thing to load, so there is nothing to
-run — and `lm` says that rather than pointing at `view`.
+Take the good manifest and delete the one line that names the plugin. Here is the
+contrast with the QML-only package above: the same field is absent, but this
+manifest says `"type": "core"`, and a core module is *only* its plugin. Nothing in
+the directory is named as the thing to load, so there is nothing to run — and `lm`
+says that rather than pointing at `view`.
 
 ```bash
-# manifest.json with "type": "core" and no "main"
+mkdir -p broken/no_main
+cp build/greeter_plugin.so broken/no_main/
+grep -v '"main"' modules/greeter/manifest.json > broken/no_main/manifest.json
+cp modules/greeter/variant broken/no_main/
 lm broken/no_main
 ```
 
@@ -393,7 +423,10 @@ instead; with neither, there is genuinely nothing here to run, and the message
 names the field that would make it whole.
 
 ```bash
-# the same manifest as above, but "type": "ui_qml"
+mkdir -p broken/ui_no_view
+sed 's/"type": "core"/"type": "ui_qml"/' broken/no_main/manifest.json \
+  > broken/ui_no_view/manifest.json
+cp modules/greeter/variant broken/ui_no_view/
 lm broken/ui_no_view
 ```
 
@@ -404,7 +437,9 @@ in the directory. That is an installation fault rather than a packaging one, so
 the message names the two ways it happens.
 
 ```bash
-# the good manifest, copied into a directory whose payload was never extracted
+# the good manifest and variant, in a directory whose payload was never extracted
+mkdir -p broken/missing_file
+cp modules/greeter/manifest.json modules/greeter/variant broken/missing_file/
 lm broken/missing_file
 ```
 
@@ -415,7 +450,11 @@ installed on. `lm` prints both sides of the mismatch: the variants `main` offers
 and the ones it tried.
 
 ```bash
-# "main": { "aix-ppc64": "greeter_plugin.a" }, installed on Linux or macOS
+mkdir -p broken/wrong_variant
+cp build/greeter_plugin.so broken/wrong_variant/
+sed 's/"main": {[^}]*}/"main": { "aix-ppc64": "greeter_plugin.a" }/' \
+  modules/greeter/manifest.json > broken/wrong_variant/manifest.json
+cp modules/greeter/variant broken/wrong_variant/
 lm broken/wrong_variant
 ```
 
@@ -442,8 +481,10 @@ than silently ignoring it.
 ### 7.1 A directory with no variant file, recovered
 
 ```bash
-lm metadata broken/no_variant_file                          # fails: nothing to match
-lm metadata broken/no_variant_file --variant linux-x86_64   # resolves
+cp -R modules/greeter broken/no_variant_file
+rm broken/no_variant_file/variant
+lm metadata broken/no_variant_file    # fails: nothing to match
+lm metadata broken/no_variant_file --variant "$(cat variant.txt)"
 ```
 
 ### 7.2 Refused on a plugin file
@@ -500,4 +541,7 @@ And the four ways a directory can fail to name a plugin, each with its own repai
 | `declares no main for this variant` | the package carries no build for this platform |
 
 The one that is *not* a failure: a `ui_qml` package with a `view` and no `main` is
-QML only, and `lm` reports the absent plugin and exits `0`.
+QML only, and `lm` reports the absent plugin and exits `0`. A `view` that names a file
+nobody extracted is not one either — it is reported as `MISSING` on the `View:` line,
+and still exits `0`, because a half-extracted install and a malformed manifest are
+different things to go and fix.
