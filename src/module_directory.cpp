@@ -117,9 +117,19 @@ MainFile locateMain(const QDir& dir, const QString& declaredPath, const QString&
         return result;
     }
 
-    if (!QFileInfo::exists(candidate)) {
+    // isFile(), not exists(): a directory named as `main` is not a plugin, and
+    // exists() would hand the caller a path it cannot load. Symlinks are
+    // followed, so a symlinked plugin still resolves.
+    const QFileInfo candidateInfo(candidate);
+    if (!candidateInfo.exists()) {
         result.state = MainResolution::FileMissing;
         result.error = QStringLiteral("main '%1' is not present in the module directory")
+                           .arg(declaredPath);
+        return result;
+    }
+    if (!candidateInfo.isFile()) {
+        result.state = MainResolution::MalformedEntry;
+        result.error = QStringLiteral("main '%1' is not a file")
                            .arg(declaredPath);
         return result;
     }

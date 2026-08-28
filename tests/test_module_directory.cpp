@@ -377,6 +377,34 @@ TEST_F(ModuleDirectoryTest, Main_UnusableValueStillLetsALaterVariantWin) {
     EXPECT_EQ(dir.main().variant, QStringLiteral("linux-amd64"));
 }
 
+TEST_F(ModuleDirectoryTest, Main_NamingADirectoryIsNotResolved) {
+    // exists() is true for a directory, which would hand the caller a path it
+    // can never load.
+    makeModuleDir();
+    writeFile(QStringLiteral("manifest.json"),
+              R"({"name":"my_module","main":"not_a_plugin"})");
+    ASSERT_TRUE(QDir(moduleDir()).mkdir(QStringLiteral("not_a_plugin")));
+
+    ModuleDirectory dir = ModuleDirectory::open(moduleDir());
+
+    EXPECT_NE(dir.main().state, MainResolution::Resolved);
+    EXPECT_EQ(dir.main().state, MainResolution::MalformedEntry);
+    EXPECT_TRUE(dir.main().path.isEmpty());
+}
+
+TEST_F(ModuleDirectoryTest, Main_SymlinkToAFileStillResolves) {
+    makeModuleDir();
+    writeFile(QStringLiteral("manifest.json"),
+              R"({"name":"my_module","main":"link_plugin.so"})");
+    writeFile(QStringLiteral("real_plugin.so"), "x");
+    ASSERT_TRUE(QFile::link(QDir(moduleDir()).absoluteFilePath(QStringLiteral("real_plugin.so")),
+                            QDir(moduleDir()).absoluteFilePath(QStringLiteral("link_plugin.so"))));
+
+    ModuleDirectory dir = ModuleDirectory::open(moduleDir());
+
+    EXPECT_EQ(dir.main().state, MainResolution::Resolved);
+}
+
 TEST_F(ModuleDirectoryTest, Main_EscapingTheDirectoryIsRefused) {
     makeModuleDir();
     writeFile(QStringLiteral("manifest.json"),
