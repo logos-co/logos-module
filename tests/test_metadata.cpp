@@ -102,6 +102,27 @@ TEST(MetadataTest, FromCustomMetadata_UnquotedVersionIsMalformedNotAbsent) {
     EXPECT_TRUE(meta.dependencies[0].versionRange.empty());
 }
 
+TEST(MetadataTest, FromCustomMetadata_NonStringSignerIsMalformedToo) {
+    // The signer half of the same guard. A DID object instead of a string
+    // reads as absent through toString(), which would drop the pin silently —
+    // and a dropped signer pin is a weaker failure than a dropped range: the
+    // edge resolves to whoever published the installed package.
+    QJsonObject did;
+    did["did"] = "did:jwk:whoever";
+    QJsonObject dep;
+    dep["name"] = "lib";
+    dep["signer"] = did;                      // an OBJECT, not a string
+    QJsonObject json;
+    json["name"] = "dependent_plugin";
+    json["dependencies"] = QJsonArray{dep};
+
+    const auto meta = ModuleLib::ModuleMetadata::fromCustomMetadata(json);
+
+    ASSERT_EQ(meta.dependencies.size(), 1u);
+    EXPECT_TRUE(meta.dependencies[0].malformedConstraint);
+    EXPECT_TRUE(meta.dependencies[0].signer.empty());
+}
+
 TEST(MetadataTest, FromCustomMetadata_WellFormedConstraintIsNotMalformed) {
     QJsonObject dep;
     dep["name"] = "lib";
