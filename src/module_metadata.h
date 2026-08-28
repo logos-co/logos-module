@@ -22,6 +22,10 @@ struct ModuleDependency {
     std::string name;
     std::string versionRange;  // empty when the entry declares no range
     std::string signer;        // empty when the entry pins no signer
+    // A `version`/`signer` present but not a string. `"version": 2` reads as
+    // ABSENT through toString(), which would unconstrain the edge; declaring a
+    // constraint we cannot read is not the same as declaring none.
+    bool malformedConstraint = false;
 };
 
 /**

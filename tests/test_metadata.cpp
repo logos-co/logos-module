@@ -84,6 +84,39 @@ TEST(MetadataTest, FromCustomMetadata_WithDependencies) {
     }
 }
 
+TEST(MetadataTest, FromCustomMetadata_UnquotedVersionIsMalformedNotAbsent) {
+    // `"version": 2` reads as absent through toString(); a consumer would then
+    // treat the edge as unconstrained and load against any installed version.
+    QJsonObject dep;
+    dep["name"] = "lib";
+    dep["version"] = 2;                       // a NUMBER, not a string
+    QJsonObject json;
+    json["name"] = "dependent_plugin";
+    json["dependencies"] = QJsonArray{dep};
+
+    const auto meta = ModuleLib::ModuleMetadata::fromCustomMetadata(json);
+
+    ASSERT_EQ(meta.dependencies.size(), 1u);
+    EXPECT_EQ(meta.dependencies[0].name, "lib");
+    EXPECT_TRUE(meta.dependencies[0].malformedConstraint);
+    EXPECT_TRUE(meta.dependencies[0].versionRange.empty());
+}
+
+TEST(MetadataTest, FromCustomMetadata_WellFormedConstraintIsNotMalformed) {
+    QJsonObject dep;
+    dep["name"] = "lib";
+    dep["version"] = "^2.0.0";
+    QJsonObject json;
+    json["name"] = "dependent_plugin";
+    json["dependencies"] = QJsonArray{dep};
+
+    const auto meta = ModuleLib::ModuleMetadata::fromCustomMetadata(json);
+
+    ASSERT_EQ(meta.dependencies.size(), 1u);
+    EXPECT_FALSE(meta.dependencies[0].malformedConstraint);
+    EXPECT_EQ(meta.dependencies[0].versionRange, "^2.0.0");
+}
+
 TEST(MetadataTest, FromCustomMetadata_WithObjectDependencies) {
     QJsonObject json;
     json["name"] = "dependent_plugin";

@@ -61,6 +61,9 @@ ModuleMetadata ModuleMetadata::fromCustomMetadata(const QJsonObject& customMetad
             entry.name = obj.value("name").toString().toStdString();
             entry.versionRange = obj.value("version").toString().toStdString();
             entry.signer = obj.value("signer").toString().toStdString();
+            entry.malformedConstraint =
+                (obj.contains("version") && !obj.value("version").isString()) ||
+                (obj.contains("signer")  && !obj.value("signer").isString());
         } else {
             entry.name = dep.toString().toStdString();
         }
