@@ -495,3 +495,77 @@ TEST_F(RealPluginMetadataTest, MetadataFromPath_StdString_ReturnsMetadata) {
     EXPECT_TRUE(result->isValid());
     EXPECT_EQ(result->name.toStdString(), "package_manager");
 }
+
+// =============================================================================
+// optional_dependencies — the second edge set
+//
+// Concrete like `dependencies` (same two entry forms, same constraints), but
+// the loader never auto-loads them and never fails over their absence. So the
+// one property worth pinning is that the two lists stay APART: every reader
+// that answers "what must be present" must not see the optional ones.
+// =============================================================================
+
+TEST(MetadataTest, FromCustomMetadata_OptionalDependenciesStaySeparate) {
+    QJsonObject json;
+    json["name"] = "consumer_plugin";
+
+    QJsonArray required;
+    required.append("hard_dep");
+    json["dependencies"] = required;
+
+    QJsonObject constrained;
+    constrained["name"] = "opt2";
+    constrained["version"] = "^1.0.0";
+    constrained["signer"] = "did:jwk:abc";
+
+    QJsonArray optional;
+    optional.append("opt1");
+    optional.append(constrained);
+    json["optional_dependencies"] = optional;
+
+    auto metadata = ModuleMetadata::fromCustomMetadata(json);
+    ASSERT_TRUE(metadata.isValid());
+
+    EXPECT_EQ(metadata.dependencyNames(), QStringList{"hard_dep"});
+    EXPECT_EQ(metadata.optionalDependencyNames(),
+              (QStringList{"opt1", "opt2"}));
+
+    // Constraints ride along on the optional entries exactly as on required
+    // ones — an installer resolves both the same way; only the loader differs.
+    ASSERT_EQ(metadata.optionalDependencies.size(), 2u);
+    EXPECT_TRUE(metadata.optionalDependencies[0].versionRange.empty());
+    EXPECT_EQ(metadata.optionalDependencies[1].versionRange, "^1.0.0");
+    EXPECT_EQ(metadata.optionalDependencies[1].signer, "did:jwk:abc");
+}
+
+TEST(MetadataTest, FromCustomMetadata_NoOptionalDependenciesKey) {
+    QJsonObject json;
+    json["name"] = "legacy_plugin";
+    QJsonArray deps;
+    deps.append("dep1");
+    json["dependencies"] = deps;
+
+    auto metadata = ModuleMetadata::fromCustomMetadata(json);
+
+    ASSERT_TRUE(metadata.isValid());
+    EXPECT_EQ(metadata.dependencies.size(), 1u);
+    EXPECT_TRUE(metadata.optionalDependencies.empty());
+}
+
+TEST(MetadataTest, FromCustomMetadata_OptionalMalformedConstraintIsFlagged) {
+    // Same rule as the required list: a constraint we cannot read is not the
+    // same as no constraint.
+    QJsonObject bad;
+    bad["name"] = "opt";
+    bad["version"] = 2;
+
+    QJsonObject json;
+    json["name"] = "x";
+    QJsonArray optional;
+    optional.append(bad);
+    json["optional_dependencies"] = optional;
+
+    auto metadata = ModuleMetadata::fromCustomMetadata(json);
+    ASSERT_EQ(metadata.optionalDependencies.size(), 1u);
+    EXPECT_TRUE(metadata.optionalDependencies[0].malformedConstraint);
+}
