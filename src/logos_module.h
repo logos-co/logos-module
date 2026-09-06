@@ -173,6 +173,22 @@ public:
      * @return std::vector<ModuleDependency> Declaration-order entries, or empty on failure
      */
     static std::vector<ModuleDependency> getModuleDependencyEntries(const std::string& pluginPath);
+
+    /**
+     * @brief Get the OPTIONAL dependency names from a plugin file without loading it.
+     *
+     * Concrete dependencies the module can call but does not require: the loader
+     * neither pulls them in nor fails when they are absent.
+     *
+     * @param pluginPath Path to the plugin file
+     * @return std::vector<std::string> The names, or empty if extraction failed
+     */
+    static std::vector<std::string> getModuleOptionalDependencies(const std::string& pluginPath);
+
+    /**
+     * @brief The optional dependency entries, constraints included.
+     */
+    static std::vector<ModuleDependency> getModuleOptionalDependencyEntries(const std::string& pluginPath);
     
     /**
      * @brief Check if the handle contains a valid loaded plugin

@@ -53,35 +53,54 @@ ModuleMetadata ModuleMetadata::fromCustomMetadata(const QJsonObject& customMetad
     // A dependency entry is either a bare name or an object holding that name
     // alongside the constraints it is resolved by (version range, signer DID).
     // Both forms declare the same edge; the bare form simply constrains nothing.
-    QJsonArray depsArray = customMetadata.value("dependencies").toArray();
-    for (const QJsonValue& dep : depsArray) {
-        ModuleDependency entry;
-        if (dep.isObject()) {
-            const QJsonObject obj = dep.toObject();
-            entry.name = obj.value("name").toString().toStdString();
-            entry.versionRange = obj.value("version").toString().toStdString();
-            entry.signer = obj.value("signer").toString().toStdString();
-            entry.malformedConstraint =
-                (obj.contains("version") && !obj.value("version").isString()) ||
-                (obj.contains("signer")  && !obj.value("signer").isString());
-        } else {
-            entry.name = dep.toString().toStdString();
+    //
+    // One reader for both arrays: they accept identical entry forms, and a
+    // second copy is how they would come to disagree about what an entry means.
+    const auto readDeps = [&](const char* field) {
+        std::vector<ModuleDependency> out;
+        for (const QJsonValue& dep : customMetadata.value(field).toArray()) {
+            ModuleDependency entry;
+            if (dep.isObject()) {
+                const QJsonObject obj = dep.toObject();
+                entry.name = obj.value("name").toString().toStdString();
+                entry.versionRange = obj.value("version").toString().toStdString();
+                entry.signer = obj.value("signer").toString().toStdString();
+                entry.malformedConstraint =
+                    (obj.contains("version") && !obj.value("version").isString()) ||
+                    (obj.contains("signer")  && !obj.value("signer").isString());
+            } else {
+                entry.name = dep.toString().toStdString();
+            }
+            if (!entry.name.empty()) {
+                out.push_back(std::move(entry));
+            }
         }
-        if (!entry.name.empty()) {
-            result.dependencies.push_back(std::move(entry));
-        }
-    }
-    
+        return out;
+    };
+
+    result.dependencies = readDeps("dependencies");
+    result.optionalDependencies = readDeps("optional_dependencies");
+
     return result;
 }
 
-QStringList ModuleMetadata::dependencyNames() const {
+namespace {
+QStringList namesOf(const std::vector<ModuleDependency>& deps) {
     QStringList names;
-    names.reserve(static_cast<int>(dependencies.size()));
-    for (const ModuleDependency& dep : dependencies) {
+    names.reserve(static_cast<int>(deps.size()));
+    for (const ModuleDependency& dep : deps) {
         names.append(QString::fromStdString(dep.name));
     }
     return names;
+}
+}  // namespace
+
+QStringList ModuleMetadata::dependencyNames() const {
+    return namesOf(dependencies);
+}
+
+QStringList ModuleMetadata::optionalDependencyNames() const {
+    return namesOf(optionalDependencies);
 }
 
 } // namespace ModuleLib

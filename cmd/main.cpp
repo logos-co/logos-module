@@ -193,6 +193,11 @@ void printMetadataHuman(const ModuleMetadata& metadata) {
     } else {
         out << "Dependencies: (none)\n";
     }
+    // Printed only when declared: a line reading "(none)" for the field almost
+    // no module uses is noise on every other module's output.
+    if (!metadata.optionalDependencyNames().isEmpty()) {
+        out << "Optional deps: " << metadata.optionalDependencyNames().join(", ") << "\n";
+    }
 }
 
 // dirObj is null for a plugin file, which genuinely has no manifest — the key
@@ -214,6 +219,10 @@ void printMetadataJson(const ModuleMetadata& metadata, const QJsonObject* dirObj
     }
 
     obj["dependencies"] = QJsonArray::fromStringList(metadata.dependencyNames());
+    // Additive: emitted only when declared, so every existing module's JSON is
+    // byte-identical.
+    if (!metadata.optionalDependencyNames().isEmpty())
+        obj["optional_dependencies"] = QJsonArray::fromStringList(metadata.optionalDependencyNames());
     if (dirObj)
         obj["module_directory"] = *dirObj;
 
@@ -976,6 +985,8 @@ int cmdInfo(const QString& pluginPath, bool jsonOutput, bool debugOutput,
         metadataObj["type"] = metadata->type;
         
         metadataObj["dependencies"] = QJsonArray::fromStringList(metadata->dependencyNames());
+        if (!metadata->optionalDependencyNames().isEmpty())
+            metadataObj["optional_dependencies"] = QJsonArray::fromStringList(metadata->optionalDependencyNames());
         
         combined["metadata"] = metadataObj;
         combined["methods"] = LogosModule::getMethodsAsJson(plugin.instance());

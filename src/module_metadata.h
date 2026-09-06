@@ -42,6 +42,13 @@ struct ModuleMetadata {
     QString author;
     QString type;
     std::vector<ModuleDependency> dependencies;
+
+    // Concrete dependencies the module can call but does NOT require
+    // (metadata.json#optional_dependencies). Same entry forms and same
+    // constraints as `dependencies`; kept apart because the loader treats them
+    // differently — never auto-loaded, and absence is not a load failure — so
+    // every reader that answers "what must be present" must not see them.
+    std::vector<ModuleDependency> optionalDependencies;
     
     // Raw JSON metadata for any additional fields
     QJsonObject rawMetadata;
@@ -59,6 +66,11 @@ struct ModuleMetadata {
      * @brief The dependency names only, in declaration order.
      */
     QStringList dependencyNames() const;
+
+    /**
+     * @brief The optional dependency names only, in declaration order.
+     */
+    QStringList optionalDependencyNames() const;
     
     /**
      * @brief Extract metadata from a plugin file without fully loading it.

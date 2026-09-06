@@ -195,6 +195,22 @@ std::vector<ModuleDependency> LogosModule::getModuleDependencyEntries(const std:
     return metadata->dependencies;
 }
 
+std::vector<std::string> LogosModule::getModuleOptionalDependencies(const std::string& pluginPath) {
+    std::vector<std::string> result;
+    for (const ModuleDependency& dep : getModuleOptionalDependencyEntries(pluginPath)) {
+        result.push_back(dep.name);
+    }
+    return result;
+}
+
+std::vector<ModuleDependency> LogosModule::getModuleOptionalDependencyEntries(const std::string& pluginPath) {
+    auto metadata = extractMetadata(QString::fromStdString(pluginPath));
+    if (!metadata) {
+        return {};
+    }
+    return metadata->optionalDependencies;
+}
+
 LogosModule LogosModule::loadFromPath(const std::string& pluginPath, std::string* errorString) {
     QString qError;
     LogosModule module = loadFromPath(QString::fromStdString(pluginPath), &qError);
