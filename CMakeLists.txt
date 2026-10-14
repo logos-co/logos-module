@@ -80,7 +80,9 @@ install(FILES ${MODULE_LIB_HEADERS}
 )
 
 # Add command-line binary
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
 add_subdirectory(cmd)
+endif()
 
 # Testing (optional)
 option(LOGOS_MODULE_BUILD_TESTS "Build tests" OFF)
